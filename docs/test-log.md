@@ -48,7 +48,10 @@ Record band, channel (DFS?), PHY mode, security (WPA/WPA2, TKIP/CCMP), BSSID OUI
 | Mac got car DHCP IPv4 | |
 | iPhone took the SLAAC address (no client isolation, RA accepted) | |
 | NAT66 states from the iPhone | |
-| Maps search + route over CarPlay | |
+| Maps search + route over CarPlay, Check For Internet Access **on** | |
+| Same with it **off** | |
+| Head unit took an `fd5c:` address? (`status` flags it) | |
+| Apple Maps search (some hosts IPv4-only) | |
 | CarPlay stayed connected | |
 
 If the iPhone takes the address but still says no internet: try the DHCPv4-race fallback (README).

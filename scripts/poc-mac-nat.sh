@@ -94,11 +94,13 @@ up() {
 	TOKEN=$(pfctl -E 2>&1 | awk '/Token/{print $NF}')
 	echo "TOKEN=$TOKEN" >> "$STATE/env"
 
-	# Short lifetimes: once the car leaves, the iPhone drops this route within ~1 min.
+	# Short router lifetime: once the car leaves, the iPhone drops the default
+	# route within ~1 min. Long valid lifetime so an address CarPlay might be
+	# using is never removed mid-drive (deprecated addresses keep sessions).
 	cat > "$STATE/rtadvd.conf" <<EOF
 $WIFI:\\
 	:maxinterval#20:mininterval#6:rltime#60:\\
-	:addr="$PREFIX":prefixlen#64:pltime#120:vltime#300:\\
+	:addr="$PREFIX":prefixlen#64:pltime#1800:vltime#86400:\\
 	:rdnssaddrs#2:rdnssaddr0="$DNS6A":rdnssaddr1="$DNS6B":rdnsslifetime#40:
 EOF
 	rtadvd -s -c "$STATE/rtadvd.conf" -p "$STATE/rtadvd.pid" "$WIFI"
@@ -125,8 +127,9 @@ status() {
 	echo "car DHCP IPv4 on Mac: $(ipconfig getifaddr "$WIFI" 2>/dev/null || echo none)"
 	echo "rtadvd: $( [ -s "$STATE/rtadvd.pid" ] && kill -0 "$(cat "$STATE/rtadvd.pid")" 2>/dev/null && echo running || echo NOT running)"
 	echo "ip6 forwarding=$(sysctl -n net.inet6.ip6.forwarding)  v6 default via $(v6_default interface)"
-	echo "clients on $PREFIX/64 (iPhone = SLAAC address):"
-	ndp -an | awk -v p="${PREFIX%::}:" -v w="$WIFI" 'index($1,p)==1 && $3==w {print "  " $1, $2}'
+	HU=$(arp -n 172.16.224.1 2>/dev/null | awk '{print $4}')
+	echo "clients on $PREFIX/64 (iPhone = SLAAC address; head unit 172.16.224.1 = ${HU:-unknown}):"
+	ndp -an | awk -v p="${PREFIX%::}:" -v w="$WIFI" -v hu="$HU" 'index($1,p)==1 && $3==w {print "  " $1, $2, ($2==hu ? "<- HEAD UNIT took an address" : "")}'
 	echo "NAT66 states: $(pfctl -s state 2>/dev/null | grep -c "${PREFIX%::}:" || true)   NAT44 states from 172.16.224.x: $(pfctl -s state 2>/dev/null | grep -c " 172\.16\.224\." || true)"
 	echo "other car-net neighbours (IPv4):"; arp -an -i "$WIFI" 2>/dev/null | sed 's/^/  /'
 }
