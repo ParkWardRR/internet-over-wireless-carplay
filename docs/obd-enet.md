@@ -28,7 +28,7 @@ Source: [Team-BHP DIY ENET cable](https://www.team-bhp.com/forum/diy-do-yourself
 | 2 | Mac Ethernet on DHCP; expect a link-local `169.254.x.x` address | Mac IP |
 | 3 | `sudo tcpdump -ni en<N> -c 200` | broadcasts: vehicle announce, ZGW IP, VIN |
 | 4 | `arp -an` and `ping -c3 169.254.255.255` | hosts on the link |
-| 5 | `nmap -sT -Pn --top-ports 200 <zgw-ip>` (slow, polite) | open ports (HSFZ diagnostics is reportedly TCP 6801, discovery UDP 6811 — to verify) |
+| 5 | `nmap -sT -Pn --top-ports 200 <zgw-ip>` (slow, polite) | open ports. Expect HSFZ diagnostics on TCP 6801 and vehicle discovery on UDP 6811 ([Quantex](https://quantexlab.com/en/develop/elm327_hsfz.html)); the car takes no DHCP and falls back to a 169.254.x.x Auto-IP ([ediabaslib](https://github.com/uholeschak/ediabaslib/blob/master/docs/ENET_WiFi_Adapter.md)) |
 | 6 | Look for a second address behind the ZGW (head unit) via the vehicle-ident reply / E-Sys connection list | head unit IP, reachable? |
 | 7 | Unplug. Confirm the car sleeps (pin 8 activation keeps the bus awake and drains the battery) | sleep OK |
 

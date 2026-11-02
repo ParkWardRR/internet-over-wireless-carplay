@@ -17,6 +17,10 @@
 #
 # Needs secrets/carplay.env (gitignored): CAR_SSID, CAR_PSK.
 # Optional: UPLINK=en7 to pick the wired interface by hand.
+# Optional: PREFIX6=2603:8003:4a00:d7ca:: to advertise a routed public /64
+# instead of the ULA (no NAT66; needs an OPNsense static route + LAN rule,
+# printed by `up`). Use it if the iPhone takes the ULA address but still has
+# no internet: some stacks treat ULA-only networks as having no IPv6.
 #
 # pf rules go into the anchor com.apple/carplay-poc, which /etc/pf.conf
 # already includes via nat-anchor "com.apple/*", so macOS's own rules stay.
@@ -27,8 +31,7 @@ STATE=/tmp/carplay-poc
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 CAR_NET=172.16.224.0/24          # NBT EVO CarPlay DHCP range (iPhone usually .100), no gateway
 GW4=172.16.224.254               # IPv4 gateway alias for a manual iPhone config (same as the Bimmerfest LTE-router setup)
-PREFIX=fd5c:ba1e:f32:1::        # ULA /64 advertised on the car Wi-Fi
-MYV6=${PREFIX}1
+PREFIX=${PREFIX6:-fd5c:ba1e:f32:1::}  # /64 advertised on the car Wi-Fi (ULA + NAT66 by default)
 DNS6A=2001:4860:4860::8888
 DNS6B=2606:4700:4700::1111
 
@@ -74,12 +77,16 @@ up() {
 		case $MYIP in ""|169.254.*) sleep 1; i=$((i+1)) ;; *) break ;; esac
 	done
 	echo "Car DHCP gave the Mac: ${MYIP:-nothing}  (router offered: $(ipconfig getoption "$WIFI" router 2>/dev/null || echo none))"
+	# Home is 172.16.0.0/16 too, so a join that failed quietly leaves the Mac on
+	# home Wi-Fi with a 172.16.x address. Never advertise a route there.
+	case $MYIP in 172.16.224.*) ;; *) die "Wi-Fi address '${MYIP:-none}' is not in $CAR_NET: not on the car network (or the car uses another subnet)" ;; esac
 
 	mkdir -p "$STATE"
-	printf 'WIFI=%s\nUPLINK=%s\nGW6=%s\n' "$WIFI" "$UPLINK" "$GW6" > "$STATE/env"
+	printf 'WIFI=%s\nUPLINK=%s\nGW6=%s\nPREFIX=%s\nFWD6=%s\nFWD4=%s\n' "$WIFI" "$UPLINK" "$GW6" "$PREFIX" \
+		"$(sysctl -n net.inet6.ip6.forwarding)" "$(sysctl -n net.inet.ip.forwarding)" > "$STATE/env"
 	date -u +%FT%TZ > "$STATE/started"
 
-	ifconfig "$WIFI" inet6 "$MYV6" prefixlen 64 alias
+	ifconfig "$WIFI" inet6 "${PREFIX}1" prefixlen 64 alias
 	ifconfig "$WIFI" alias "$GW4" netmask 255.255.255.255
 	sysctl -w net.inet6.ip6.forwarding=1 >/dev/null
 	sysctl -w net.inet.ip.forwarding=1 >/dev/null
@@ -89,27 +96,42 @@ up() {
 		route -n add -inet6 default "$GW6" >/dev/null && echo "ADDED_V6DEF=1" >> "$STATE/env"
 	fi
 
-	printf 'nat on %s inet6 from %s/64 to any -> (%s)\nnat on %s inet from %s to any -> (%s)\n' \
-		"$UPLINK" "$PREFIX" "$UPLINK" "$UPLINK" "$CAR_NET" "$UPLINK" | pfctl -a "$ANCHOR" -N -f - 2>/dev/null
+	# ULA needs NAT66; a public /64 is routed to us by OPNsense and goes out as is.
+	{
+		case $PREFIX in fd*) printf 'nat on %s inet6 from %s/64 to any -> (%s)\n' "$UPLINK" "$PREFIX" "$UPLINK" ;; esac
+		printf 'nat on %s inet from %s to any -> (%s)\n' "$UPLINK" "$CAR_NET" "$UPLINK"
+	} | pfctl -a "$ANCHOR" -N -f - 2>/dev/null
 	TOKEN=$(pfctl -E 2>&1 | awk '/Token/{print $NF}')
 	echo "TOKEN=$TOKEN" >> "$STATE/env"
 
 	# Short router lifetime: once the car leaves, the iPhone drops the default
 	# route within ~1 min. Long valid lifetime so an address CarPlay might be
 	# using is never removed mid-drive (deprecated addresses keep sessions).
+	# RDNSS lifetime: rtadvd caps it at 2 x maxinterval (40 s), under RFC 8106's
+	# 3 x; RAs refresh it every <= 20 s. rtadvd also takes pref64addr/pref64len
+	# (undocumented), left out because the Mac does no NAT64.
 	cat > "$STATE/rtadvd.conf" <<EOF
 $WIFI:\\
 	:maxinterval#20:mininterval#6:rltime#60:\\
 	:addr="$PREFIX":prefixlen#64:pltime#1800:vltime#86400:\\
 	:rdnssaddrs#2:rdnssaddr0="$DNS6A":rdnssaddr1="$DNS6B":rdnsslifetime#40:
 EOF
+	# Same order as Apple's own run-rtadvd: forwarding on, then routermode.
+	ifconfig "$WIFI" inet6 routermode enabled
 	rtadvd -s -c "$STATE/rtadvd.conf" -p "$STATE/rtadvd.pid" "$WIFI"
 	sleep 1
 	[ -s "$STATE/rtadvd.pid" ] || die "rtadvd did not start (check: log show --last 1m --predicate 'process == \"rtadvd\"')"
 
+	case $PREFIX in fd*) ;; *) cat <<EOF
+
+Routed prefix: on OPNsense add System > Routes: $PREFIX/64 via
+$(ifconfig "$UPLINK" | awk '/inet6 2/ && !/temporary|deprecated/ {print $2; exit}') (this Mac's $UPLINK), and a LAN firewall rule
+passing source $PREFIX/64 (the default "LAN net" rule doesn't cover it).
+EOF
+	esac
 	cat <<EOF
 
-Ready: advertising $PREFIX/64 + DNS on $WIFI, NAT66 + NAT44 out of $UPLINK.
+Ready: advertising $PREFIX/64 + DNS on $WIFI, $(case $PREFIX in fd*) echo NAT66 ;; *) echo routed IPv6 ;; esac) + NAT44 out of $UPLINK.
 On the iPhone: Settings > Wi-Fi > "$CAR_SSID" > Check For Internet Access ON.
 If iOS offers IP settings for it (Settings > Wi-Fi > Edit > Known Networks),
 the proven IPv4 way also works: Configure IP Manual 172.16.224.5 / 255.255.255.0,
@@ -127,6 +149,7 @@ status() {
 	echo "car DHCP IPv4 on Mac: $(ipconfig getifaddr "$WIFI" 2>/dev/null || echo none)"
 	echo "rtadvd: $( [ -s "$STATE/rtadvd.pid" ] && kill -0 "$(cat "$STATE/rtadvd.pid")" 2>/dev/null && echo running || echo NOT running)"
 	echo "ip6 forwarding=$(sysctl -n net.inet6.ip6.forwarding)  v6 default via $(v6_default interface)"
+	[ "$(v6_default interface)" = "$UPLINK" ] || echo "  WARNING: IPv6 default is not via $UPLINK, so NAT66 has no way out (RA-learned route expired?): route -n add -inet6 default $GW6"
 	HU=$(arp -n 172.16.224.1 2>/dev/null | awk '{print $4}')
 	echo "clients on $PREFIX/64 (iPhone = SLAAC address; head unit 172.16.224.1 = ${HU:-unknown}):"
 	ndp -an | awk -v p="${PREFIX%::}:" -v w="$WIFI" -v hu="$HU" 'index($1,p)==1 && $3==w {print "  " $1, $2, ($2==hu ? "<- HEAD UNIT took an address" : "")}'
@@ -139,13 +162,14 @@ down() {
 	[ -s "$STATE/rtadvd.pid" ] && kill "$(cat "$STATE/rtadvd.pid")" 2>/dev/null || true
 	pfctl -a "$ANCHOR" -F all 2>/dev/null || true
 	[ -n "${TOKEN:-}" ] && pfctl -X "$TOKEN" 2>/dev/null || true
-	sysctl -w net.inet6.ip6.forwarding=0 >/dev/null
-	sysctl -w net.inet.ip.forwarding=0 >/dev/null
-	[ -n "${WIFI:-}" ] && ifconfig "$WIFI" inet6 "$MYV6" -alias 2>/dev/null || true
+	sysctl -w net.inet6.ip6.forwarding="${FWD6:-0}" >/dev/null
+	sysctl -w net.inet.ip.forwarding="${FWD4:-0}" >/dev/null
+	[ -n "${WIFI:-}" ] && ifconfig "$WIFI" inet6 routermode disabled 2>/dev/null || true
+	[ -n "${WIFI:-}" ] && ifconfig "$WIFI" inet6 "${PREFIX}1" -alias 2>/dev/null || true
 	[ -n "${WIFI:-}" ] && ifconfig "$WIFI" -alias "$GW4" 2>/dev/null || true
 	[ "${ADDED_V6DEF:-0}" = 1 ] && route -n delete -inet6 default >/dev/null 2>&1 || true
 	rm -rf "$STATE"
-	echo "Undone: rtadvd stopped, NAT removed, forwarding off, ULA + $GW4 aliases removed."
+	echo "Undone: rtadvd stopped, NAT removed, forwarding restored, ${PREFIX}1 + $GW4 aliases removed."
 	echo "The Mac stays on the car Wi-Fi until you switch networks."
 }
 

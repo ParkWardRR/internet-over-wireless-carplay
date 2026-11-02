@@ -6,6 +6,7 @@ One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never he
 |---|---|---|---|---|
 | 2026-11-01 | P0 | iPhone → Settings → Wi-Fi → car network | CarPlay page: no IP/router/DNS fields, no password field. **Weak Security** label. Has **Check For Internet Access** toggle + Manage CarPlay | Next: Passwords app → Wi-Fi, and Settings → Wi-Fi → Edit → Known Networks |
 | 2026-11-01 | — | Read the Bimmerfest thread | Car net 172.16.224.0/24, no gateway; 2nd client OK; LTE router at .254 + manual iPhone IP worked (2022); iOS shows the PSK since ~2025 | Script now also offers 172.16.224.254 + NAT44 |
+| 2026-11-01 | — | Re-checked sources (Bimmerfest now bot-walled; used the gearshifters copy, Apple forum 76449, WWDC17 #717, Audi TSB, odhcpd/OpenWrt source) | Subnet, no gateway, 2nd client, 10-char PSK over Bluetooth confirmed. "iOS shows the PSK since 2025" **not** confirmed. Car announces "no internet" in its beacon (Apple Device IE). odhcpd lifetime facts corrected. Mac keychain has no CarPlay network | Docs + script updated: car-subnet guard, `PREFIX6` routed-prefix mode, routermode, forwarding restore |
 
 ## P0 — iPhone, car network
 
@@ -14,7 +15,9 @@ One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never he
 | SSID pattern | `BMW<5 digits> CarPlay` |
 | Security | "Weak Security" (WPA/TKIP or WPA/WPA2 mixed, to confirm in P1) |
 | IP settings | not shown for CarPlay networks |
-| Password revealable? | no |
+| Password revealable? | not on the CarPlay page |
+| Settings → Wi-Fi → Edit → ⓘ: listed? Password? Configure IP? | |
+| Passwords app → Wi-Fi: listed? | |
 | Check For Internet Access | present; **turn it on** for P2 |
 | Head unit | factory NBT EVO |
 | iOS version | |
@@ -30,17 +33,20 @@ sudo wdutil info                     # current link
 system_profiler SPAirPortDataType | sed -n '/Other Local Wi-Fi Networks/,$p' | grep -A8 -i carplay
 ```
 
-Record band, channel (DFS?), PHY mode, security (WPA/WPA2, TKIP/CCMP), BSSID OUI.
+Record band, channel (DFS?), PHY mode, security (WPA/WPA2, TKIP/CCMP), BSSID OUI. `system_profiler` lists channel, band, PHY mode and security per network (checked on macOS 27); the old `airport -s` tool is gone.
+
+The band decides the box: a 2.4 GHz-only travel router can't join a 5 GHz car AP.
 
 ## P2 — MacBook proof of concept (IPv6 RA)
 
 1. `cp secrets.example.env secrets/carplay.env` and fill in the SSID + PSK.
 2. Plug the USB-C Ethernet adapter into the garage LAN (needs a 172.16.x address and global IPv6).
-3. `sudo scripts/poc-mac-nat.sh up`. It joins the car Wi-Fi, adds `fd5c:ba1e:f32:1::1/64`, starts `rtadvd` (60 s router lifetime, RDNSS 2001:4860:4860::8888 + 2606:4700:4700::1111) and NAT66 out of the Ethernet.
-4. iPhone: Settings → Wi-Fi → car network → **Check For Internet Access ON**. Start CarPlay.
-5. `sudo scripts/poc-mac-nat.sh status`. Success looks like the iPhone listed with an `fd5c:ba1e:f32:1:` address and NAT66 states > 0.
-6. Google Maps on CarPlay: search + route. Record: does it work, latency, CarPlay stable?
-7. `sudo scripts/poc-mac-nat.sh down`.
+3. Look before talking. Join the car Wi-Fi by hand, start CarPlay, and capture for two minutes: `sudo tcpdump -ni en0 -w secrets/p2-passive.pcap 'icmp6 or udp port 5353 or udp port 67 or udp port 68'`. Answers: does the head unit send RAs of its own (ICMPv6 type 134)? Which IPv6 addresses does CarPlay use (link-local expected)? What is the head unit's IPv4 address (the docs assume `172.16.224.1`)?
+4. `sudo scripts/poc-mac-nat.sh up`. It joins the car Wi-Fi, adds `fd5c:ba1e:f32:1::1/64`, starts `rtadvd` (60 s router lifetime, RDNSS 2001:4860:4860::8888 + 2606:4700:4700::1111) and NAT66 out of the Ethernet. It stops before touching anything if the Mac's Wi-Fi address isn't in 172.16.224.0/24, because home is 172.16.x too and a failed join would otherwise advertise the route on home Wi-Fi.
+5. iPhone: Settings → Wi-Fi → car network → **Check For Internet Access ON**. Start CarPlay.
+6. `sudo scripts/poc-mac-nat.sh status`. Success looks like the iPhone listed with an `fd5c:ba1e:f32:1:` address and NAT66 states > 0.
+7. Google Maps on CarPlay: search + route. Record: does it work, latency, CarPlay stable?
+8. `sudo scripts/poc-mac-nat.sh down`.
 
 | Check | Result |
 |---|---|
@@ -50,6 +56,8 @@ Record band, channel (DFS?), PHY mode, security (WPA/WPA2, TKIP/CCMP), BSSID OUI
 | NAT66 states from the iPhone | |
 | Maps search + route over CarPlay, Check For Internet Access **on** | |
 | Same with it **off** | |
+| If ULA failed: same with `PREFIX6=` a routed /64 | |
+| Head unit sends its own RAs? (passive capture) | |
 | Head unit took an `fd5c:` address? (`status` flags it) | |
 | Apple Maps search (some hosts IPv4-only) | |
 | CarPlay stayed connected | |
