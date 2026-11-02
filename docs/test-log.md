@@ -39,6 +39,15 @@ Record band, channel (DFS?), PHY mode, security (WPA/WPA2, TKIP/CCMP), BSSID OUI
 
 The band decides the box: a 2.4 GHz-only travel router can't join a 5 GHz car AP.
 
+Then read the car's beacon flags: `scripts/car-ie.sh` (allow Location for CarIE on first run; macOS hides raw IEs otherwise; `--selftest` checks the decoder). It prints the Apple Device IE flags and the Interworking element.
+
+| Field | Value |
+|---|---|
+| Band / channel / security | |
+| Apple Device IE flags (hex + names) | |
+| `InternetAccess` (bit 11) | |
+| Interworking element present? Internet bit? | |
+
 ## P2 — MacBook proof of concept (IPv6 RA)
 
 1. `cp secrets.example.env secrets/carplay.env` and fill in the SSID + PSK.
