@@ -36,6 +36,8 @@ Record band, channel (DFS?), PHY mode, security (WPA2/WPA3), BSSID OUI.
 
 ## P2 — MacBook proof of concept
 
+Scripted: `cp secrets.example.env secrets/carplay.env`, fill in, plug the USB-C Ethernet adapter into the garage LAN, then `sudo scripts/poc-mac-nat.sh up` (`status`, `down`). Manual steps below for reference.
+
 1. Mac: join the car SSID with the PSK; USB-C Ethernet to the garage LAN.
 2. `sudo sysctl -w net.inet.ip.forwarding=1`
 3. pf NAT (`en7` = Ethernet uplink, `CAR_NET` = car subnet from P0, e.g. `192.168.1.0/24`). This replaces the main pf ruleset until undone:

@@ -24,6 +24,7 @@ flowchart LR
 |---|---|---|---|---|---|
 | 0 | Offline maps (Google Maps offline area / Apple Maps offline) + start the route on home Wi-Fi before CarPlay connects | $0 | no | Works today for known places; search outside the area fails | to test |
 | 1 | **Garage Wi-Fi bridge**: box joins the car's CarPlay SSID as a client, NATs to garage Ethernet; phone gets router/DNS for that SSID | ~$40–90 | no | Best bet | **main track** |
+| 1b | iPhone (USB-C models) + USB Ethernet adapter, cabled to a small travel router in the car that's a client of the garage Wi-Fi. Wi-Fi stays on CarPlay; internet goes over Ethernet. No PSK needed | ~$50 | no | Should work; adds a cable to the phone | backup if the PSK can't be found |
 | 2 | Cellular booster (donor antenna outside, indoor antenna in garage) | $400–1,000 | no | Works for everyone and every app | fallback |
 | 3 | OBD-II ENET: talk to the ZGW/head unit over the diagnostic Ethernet and look for an IP path to the head unit's Wi-Fi | ENET cable ~$15 | read-only | Learning; a usable route is unlikely without rooting the head unit | exploration |
 | 4 | Root the head unit (QNX) and NAT Wi-Fi ↔ ENET | time + risk | yes | Possible in theory, high risk of bricking | not planned |
@@ -39,12 +40,23 @@ flowchart LR
 | **P4** | Exit test: drive out with the manual config in place; time the fallback to cellular | No dead zone when leaving |
 | **P5** | OBD ENET exploration (`docs/obd-enet.md`) | What's reachable from the OBD port |
 
-## Unknowns to settle first
+## Known
 
-- **Head unit**: factory NBT EVO ID5/ID6 (2017+ LCI, wireless CarPlay) or an aftermarket CarPlay retrofit box? Retrofit boxes are Linux/Android boards and change the whole picture.
-- **CarPlay PSK**: is it visible on the iPhone (iOS 16+ shows saved Wi-Fi passwords)? If not, see the [Bimmerfest thread](https://www.bimmerfest.com/threads/nbt-evo-carplay-wifi-password.1376809/) referenced from the Apple thread.
-- **Car AP**: allows more than one client? Isolates clients?
-- **Garage**: Ethernet drop and power near the parking spot.
+- **Head unit:** factory NBT EVO (wireless CarPlay).
+- **Garage:** Ethernet, home Wi-Fi and power at the parking spot.
+
+## Blocker: the CarPlay Wi-Fi password (PSK)
+
+The iPhone doesn't show it (checked 2026-11-01), and the Mac's iCloud keychain has no car entry. Ways to get it, in order:
+
+| # | Route | Notes |
+|---|---|---|
+| 1 | [Bimmerfest: "NBT EVO CarPlay WiFi password"](https://www.bimmerfest.com/threads/nbt-evo-carplay-wifi-password.1376809/) | Linked from the Apple thread as a working method. Paywalled for bots (HTTP 402), so open it in a browser |
+| 2 | Encrypted Finder backup of the iPhone → decrypt its keychain | The phone has the PSK saved for the car network. Needs a backup decryptor (small Go tool); the CarPlay entry may be device-only and excluded |
+| 3 | NBT EVO service menu ([BMW SIB B65 09 16](https://bmwtechinfo.bmwgroup.com/sib_attachments/B65%2009%2016%20Service%20Menu%20for%20NBT%20and%20NBT%20EVO%20Head%20Units.pdf)) | Look for a WLAN/CarPlay page. Read-only browsing |
+| 4 | Approach 1b | Avoids the PSK entirely |
+
+Still unknown: whether the car AP allows a second client, and whether it isolates clients (P2 answers both).
 
 ## Rules
 
