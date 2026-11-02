@@ -42,10 +42,11 @@ The band decides the box: a 2.4 GHz-only travel router can't join a 5 GHz car AP
 1. `cp secrets.example.env secrets/carplay.env` and fill in the SSID + PSK.
 2. Plug the USB-C Ethernet adapter into the garage LAN (needs a 172.16.x address and global IPv6).
 3. Look before talking. Join the car Wi-Fi by hand, start CarPlay, and capture for two minutes: `sudo tcpdump -ni en0 -w secrets/p2-passive.pcap 'icmp6 or udp port 5353 or udp port 67 or udp port 68'`. Answers: does the head unit send RAs of its own (ICMPv6 type 134)? Which IPv6 addresses does CarPlay use (link-local expected)? What is the head unit's IPv4 address (the docs assume `172.16.224.1`)?
+   Watch the phone's side at the same time: `rvictl` capture and iOS logs, see [iphone-diagnostics.md](iphone-diagnostics.md). Run **CarNet Probe** before step 4 for a baseline.
 4. `sudo scripts/poc-mac-nat.sh up`. It joins the car Wi-Fi, adds `fd5c:ba1e:f32:1::1/64`, starts `rtadvd` (60 s router lifetime, RDNSS 2001:4860:4860::8888 + 2606:4700:4700::1111) and NAT66 out of the Ethernet. It stops before touching anything if the Mac's Wi-Fi address isn't in 172.16.224.0/24, because home is 172.16.x too and a failed join would otherwise advertise the route on home Wi-Fi.
 5. iPhone: Settings → Wi-Fi → car network → **Check For Internet Access ON**. Start CarPlay.
 6. `sudo scripts/poc-mac-nat.sh status`. Success looks like the iPhone listed with an `fd5c:ba1e:f32:1:` address and NAT66 states > 0.
-7. Google Maps on CarPlay: search + route. Record: does it work, latency, CarPlay stable?
+7. Google Maps on CarPlay: search + route. Record: does it work, latency, CarPlay stable? Then CarNet Probe → **Run probes**, and share the log into `secrets/`.
 8. `sudo scripts/poc-mac-nat.sh down`.
 
 | Check | Result |
@@ -58,6 +59,10 @@ The band decides the box: a 2.4 GHz-only travel router can't join a 5 GHz car AP
 | Same with it **off** | |
 | If ULA failed: same with `PREFIX6=` a routed /64 | |
 | Head unit sends its own RAs? (passive capture) | |
+| CarNet Probe: Wi-Fi path status / gateways / "any" path interface | |
+| CarNet Probe: probes Wi-Fi-only vs default (captive, google maps) | |
+| CarNet Probe: AAAA answers on the ULA network? | |
+| iOS logs: reason for internet / no internet on the car Wi-Fi | |
 | Head unit took an `fd5c:` address? (`status` flags it) | |
 | Apple Maps search (some hosts IPv4-only) | |
 | CarPlay stayed connected | |
@@ -84,4 +89,4 @@ Under a few ms from the car means a box rarely wins; tens of ms or more makes a 
 
 ## P4 — exit test
 
-Drive out with the box running. Time from leaving the garage to Maps updating over cellular (router lifetime is 60 s).
+Drive out with the box running. Time from leaving the garage to Maps updating over cellular (router lifetime is 60 s). Leave CarNet Probe open with **Watch** on: its log timestamps when the default path leaves the car Wi-Fi.
