@@ -4,7 +4,8 @@ One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never he
 
 | Date | Phase | Setup | Result | Notes |
 |---|---|---|---|---|
-| 2026-11-01 | P0 | iPhone → Settings → Wi-Fi → car network | CarPlay page: no IP/router/DNS fields, no password field. **Weak Security** label. Has **Check For Internet Access** toggle + Manage CarPlay | Manual router on the phone is impossible → route must come from the network (IPv6 RA) |
+| 2026-11-01 | P0 | iPhone → Settings → Wi-Fi → car network | CarPlay page: no IP/router/DNS fields, no password field. **Weak Security** label. Has **Check For Internet Access** toggle + Manage CarPlay | Next: Passwords app → Wi-Fi, and Settings → Wi-Fi → Edit → Known Networks |
+| 2026-11-01 | — | Read the Bimmerfest thread | Car net 172.16.224.0/24, no gateway; 2nd client OK; LTE router at .254 + manual iPhone IP worked (2022); iOS shows the PSK since ~2025 | Script now also offers 172.16.224.254 + NAT44 |
 
 ## P0 — iPhone, car network
 

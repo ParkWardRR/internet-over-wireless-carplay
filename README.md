@@ -10,12 +10,16 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 
 | Fact | Source |
 |---|---|
-| Car DHCP gives the phone an address but **no router, no DNS** | [Apple dev forum, BMW G30](https://developer.apple.com/forums/thread/76449) |
+| Car DHCP gives the phone an address in **172.16.224.0/24** (iPhone usually `.100`) but **no router, no DNS**. The car's own LTE hotspot (if fitted) is 172.16.222.x and firewalled from it | [Bimmerfest](https://www.bimmerfest.com/threads/nbt-evo-carplay-wifi-password.1376809/), [Apple dev forum](https://developer.apple.com/forums/thread/76449) |
+| **A second client works**: a laptop joined the CarPlay Wi-Fi and pinged the iPhone (no client isolation) | Bimmerfest #1, 2020 |
+| **Proven end to end**: an LTE router joined the CarPlay Wi-Fi as `172.16.224.254`; the iPhone set manual IP `172.16.224.5/24`, router + DNS `.254`, and got internet while CarPlay kept running | Bimmerfest #2, 2022 |
+| PSK = 10 random alphanumerics, delivered over Bluetooth. **Since ~2025 iOS shows it**, no jailbreak needed | Bimmerfest #1, #3 (Jan 2025) |
+| Home LAN is 172.16.0.0/16, which overlaps the car's 172.16.224.0/24. Nothing at home uses .224.x and the box NATs, so it's harmless | Kea config |
 | iOS shows **no IP/router/DNS settings** for CarPlay networks, only a **Check For Internet Access** toggle ("If your car offers hotspot internet access… you may be able to use that hotspot") | the iPhone, 2026-11-01 |
 | iOS labels the car network **Weak Security**: probably WPA/TKIP or WPA/WPA2 mixed. The bridge box must allow legacy WPA | the iPhone, 2026-11-01 |
 | Home has native IPv6 (Spectrum); Google Maps APIs answer over IPv6 | tested from the Mac |
 
-So the route has to come from the network, not from phone settings. **Plan: IPv6 router advertisements.** A box on the car Wi-Fi advertises an IPv6 prefix, a default route and DNS (RDNSS), and NAT66es to the home connection. The car's IPv4 is left alone, so there's no DHCP fight. With Check For Internet Access on, iOS should use it. Fallback if iOS ignores an IPv6-only route: answer DHCPv4 faster than the car, with a router option (racy).
+If iOS still exposes IP settings for the CarPlay network somewhere (Settings → Wi-Fi → Edit → Known Networks), the proven manual-IPv4 setup is enough. If not, the route has to come from the network. **Plan: IPv6 router advertisements.** A box on the car Wi-Fi advertises an IPv6 prefix, a default route and DNS (RDNSS), and NAT66es to the home connection. The car's IPv4 is left alone, so there's no DHCP fight. With Check For Internet Access on, iOS should use it. Fallback if iOS ignores an IPv6-only route: answer DHCPv4 faster than the car, with a router option (racy).
 
 ```mermaid
 flowchart LR
@@ -56,16 +60,18 @@ flowchart LR
 
 ## Blocker: the CarPlay Wi-Fi password (PSK)
 
-The box has to join the car's Wi-Fi, so it needs the PSK. The iPhone doesn't show it, and the Mac's iCloud keychain has no car entry. Ways to get it, in order:
+The box has to join the car's Wi-Fi, so it needs the PSK. The CarPlay page in Settings → Wi-Fi doesn't show it, but per Bimmerfest (Jan 2025) iOS does expose it somewhere now. Where to look, in order:
 
 | # | Route | Notes |
 |---|---|---|
-| 1 | [Bimmerfest: "NBT EVO CarPlay WiFi password"](https://www.bimmerfest.com/threads/nbt-evo-carplay-wifi-password.1376809/) | Linked from the Apple thread as a working method. Paywalled for bots (HTTP 402), so open it in a browser |
-| 2 | Encrypted Finder backup of the iPhone → decrypt its keychain | The phone has the PSK saved for the car network. Needs a backup decryptor (small Go tool); the CarPlay entry may be device-only and excluded |
-| 3 | NBT EVO service menu ([BMW SIB B65 09 16](https://bmwtechinfo.bmwgroup.com/sib_attachments/B65%2009%2016%20Service%20Menu%20for%20NBT%20and%20NBT%20EVO%20Head%20Units.pdf)) | Look for a WLAN/CarPlay page. Read-only browsing |
+| 1 | **Passwords app → Wi-Fi** → `BMW… CarPlay` | iOS 18+ lists every known network here |
+| 2 | Settings → Wi-Fi → **Edit** → Known Networks → (i) | May also show the IP settings the CarPlay page hides |
+| 3 | Encrypted Finder backup of the iPhone → decrypt its keychain | Needs a backup decryptor (small Go tool) |
 | 4 | Approach 1b | Avoids the PSK entirely |
 
-Still unknown: whether the car AP allows a second client, whether it isolates clients, and whether iOS accepts an IPv6-only internet route on a CarPlay network (P2 answers all three).
+Brute force is out: 62^10 keyspace.
+
+Still unknown: whether iOS accepts an IPv6-only internet route on a CarPlay network (P2 answers it).
 
 ## Rules
 
