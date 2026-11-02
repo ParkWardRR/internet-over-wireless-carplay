@@ -1,25 +1,32 @@
 #!/bin/sh
 # P2 proof of concept: the MacBook joins the car's CarPlay Wi-Fi as a second
-# client and NATs it to the home LAN over a wired adapter. The iPhone then
-# uses the Mac as its router on the car network.
+# client and offers the iPhone an IPv6 route to the internet.
 #
-#   sudo scripts/poc-mac-nat.sh up       # join car Wi-Fi, forward + NAT
-#   sudo scripts/poc-mac-nat.sh status   # what's set, NAT states from the car
-#   sudo scripts/poc-mac-nat.sh down     # undo everything except the Wi-Fi join
+# iOS shows no IP/router settings for CarPlay networks, and the car's DHCP
+# hands out no router. So the route comes from IPv6 instead: the Mac sends
+# router advertisements (rtadvd) on the car Wi-Fi with a ULA prefix, a short
+# router lifetime and RDNSS, and NAT66es that prefix out of the wired uplink
+# (home has native IPv6). The car's IPv4 setup is left alone.
+# On the iPhone: Settings > Wi-Fi > the car network > Check For Internet Access ON.
 #
-# Needs secrets/carplay.env (gitignored):
-#   CAR_SSID='BMW12345 CarPlay'
-#   CAR_PSK='...'
+#   sudo scripts/poc-mac-nat.sh up       # join car Wi-Fi, RA + NAT66
+#   sudo scripts/poc-mac-nat.sh status   # did the iPhone take an address? NAT states
+#   sudo scripts/poc-mac-nat.sh down     # undo (the Mac stays on the car Wi-Fi)
+#
+# Needs secrets/carplay.env (gitignored): CAR_SSID, CAR_PSK.
 # Optional: UPLINK=en7 to pick the wired interface by hand.
 #
-# NAT rules go into the anchor com.apple/carplay-poc, which /etc/pf.conf
+# pf rules go into the anchor com.apple/carplay-poc, which /etc/pf.conf
 # already includes via nat-anchor "com.apple/*", so macOS's own rules stay.
 set -eu
 
 ANCHOR=com.apple/carplay-poc
 STATE=/tmp/carplay-poc
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-DNS=172.16.1.69
+PREFIX=fd5c:ba1e:f32:1::        # ULA /64 advertised on the car Wi-Fi
+MYV6=${PREFIX}1
+DNS6A=2001:4860:4860::8888
+DNS6B=2606:4700:4700::1111
 
 die() { echo "error: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "run with sudo"
@@ -39,73 +46,92 @@ find_uplink() {
 	return 1
 }
 
-ip2int() { echo "$1" | awk -F. '{print ($1*16777216)+($2*65536)+($3*256)+$4}'; }
-int2ip() { echo "$1" | awk '{printf "%d.%d.%d.%d", int($1/16777216)%256, int($1/65536)%256, int($1/256)%256, $1%256}'; }
-masklen() { echo "$1" | awk -F. '{n=0; for(i=1;i<=4;i++){v=$i; while(v>0){n+=v%2; v=int(v/2)}} print n}'; }
+v6_default() { route -n get -inet6 default 2>/dev/null | awk -v k="$1:" '$1==k{print $2}'; }
 
 up() {
 	[ -f "$HERE/secrets/carplay.env" ] || die "missing $HERE/secrets/carplay.env (CAR_SSID, CAR_PSK)"
 	. "$HERE/secrets/carplay.env"
 	[ -n "${CAR_SSID:-}" ] && [ -n "${CAR_PSK:-}" ] || die "CAR_SSID and CAR_PSK must be set"
+	[ ! -f "$STATE/env" ] || die "already up; run down first"
 
 	WIFI=$(wifi_if); [ -n "$WIFI" ] || die "no Wi-Fi interface"
 	UPLINK=${UPLINK:-$(find_uplink "$WIFI" || true)}
 	[ -n "$UPLINK" ] || die "no wired interface with a 172.16.x address: plug in the Ethernet adapter first (or set UPLINK=)"
-	echo "Wi-Fi: $WIFI   uplink: $UPLINK ($(ipconfig getifaddr "$UPLINK"))"
+	ifconfig "$UPLINK" | grep -q 'inet6 2' || die "$UPLINK has no global IPv6 address, so NAT66 has nowhere to go"
+	GW6=$(v6_default gateway); GW6IF=$(v6_default interface)
+	[ "$GW6IF" = "$UPLINK" ] || die "IPv6 default route is via '${GW6IF:-none}', not $UPLINK"
+	echo "Wi-Fi: $WIFI   uplink: $UPLINK   IPv6 gateway: $GW6"
 
 	echo "Joining \"$CAR_SSID\"..."
 	networksetup -setairportnetwork "$WIFI" "$CAR_SSID" "$CAR_PSK" || die "join failed (wrong PSK, or the car refuses a second client?)"
-
 	i=0; MYIP=
 	while [ $i -lt 30 ]; do
 		MYIP=$(ipconfig getifaddr "$WIFI" 2>/dev/null || true)
 		case $MYIP in ""|169.254.*) sleep 1; i=$((i+1)) ;; *) break ;; esac
 	done
-	case $MYIP in ""|169.254.*) die "no DHCP address from the car after 30 s (got '${MYIP:-none}')" ;; esac
-	MASK=$(ipconfig getoption "$WIFI" subnet_mask)
-	ROUTER=$(ipconfig getoption "$WIFI" router 2>/dev/null || true)
-	NET=$(int2ip $(( $(ip2int "$MYIP") & $(ip2int "$MASK") )))
-	CAR_NET="$NET/$(masklen "$MASK")"
-	echo "Car network: $CAR_NET   Mac on it: $MYIP   car offers router: ${ROUTER:-none}"
+	echo "Car DHCP gave the Mac: ${MYIP:-nothing}  (router offered: $(ipconfig getoption "$WIFI" router 2>/dev/null || echo none))"
 
-	DEF=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')
-	[ "$DEF" = "$UPLINK" ] || echo "warning: default route is via ${DEF:-nothing}, not $UPLINK. NAT will still work, but this Mac's own traffic may break."
-
-	sysctl -w net.inet.ip.forwarding=1 >/dev/null
-	printf 'nat on %s inet from %s to any -> (%s)\n' "$UPLINK" "$CAR_NET" "$UPLINK" | pfctl -a "$ANCHOR" -N -f - 2>/dev/null
-	TOKEN=$(pfctl -E 2>&1 | awk '/Token/{print $NF}')
 	mkdir -p "$STATE"
-	printf 'WIFI=%s\nUPLINK=%s\nCAR_NET=%s\nMYIP=%s\nTOKEN=%s\n' "$WIFI" "$UPLINK" "$CAR_NET" "$MYIP" "$TOKEN" > "$STATE/env"
+	printf 'WIFI=%s\nUPLINK=%s\nGW6=%s\n' "$WIFI" "$UPLINK" "$GW6" > "$STATE/env"
 	date -u +%FT%TZ > "$STATE/started"
+
+	ifconfig "$WIFI" inet6 "$MYV6" prefixlen 64 alias
+	sysctl -w net.inet6.ip6.forwarding=1 >/dev/null
+	# With forwarding on, macOS stops taking RAs, so pin the uplink's default route.
+	sleep 1
+	if [ "$(v6_default interface)" != "$UPLINK" ]; then
+		route -n add -inet6 default "$GW6" >/dev/null && echo "ADDED_V6DEF=1" >> "$STATE/env"
+	fi
+
+	printf 'nat on %s inet6 from %s/64 to any -> (%s)\n' "$UPLINK" "$PREFIX" "$UPLINK" | pfctl -a "$ANCHOR" -N -f - 2>/dev/null
+	TOKEN=$(pfctl -E 2>&1 | awk '/Token/{print $NF}')
+	echo "TOKEN=$TOKEN" >> "$STATE/env"
+
+	# Short lifetimes: once the car leaves, the iPhone drops this route within ~1 min.
+	cat > "$STATE/rtadvd.conf" <<EOF
+$WIFI:\\
+	:maxinterval#20:mininterval#6:rltime#60:\\
+	:addr="$PREFIX":prefixlen#64:pltime#120:vltime#300:\\
+	:rdnssaddrs#2:rdnssaddr0="$DNS6A":rdnssaddr1="$DNS6B":rdnsslifetime#40:
+EOF
+	rtadvd -s -c "$STATE/rtadvd.conf" -p "$STATE/rtadvd.pid" "$WIFI"
+	sleep 1
+	[ -s "$STATE/rtadvd.pid" ] || die "rtadvd did not start (check: log show --last 1m --predicate 'process == \"rtadvd\"')"
 
 	cat <<EOF
 
-Ready. On the iPhone, Settings > Wi-Fi > (i) next to "$CAR_SSID":
-  Configure IP  > Manual: keep the IP address and Subnet Mask it shows now,
-                  set Router = $MYIP
-  Configure DNS > Manual: $DNS
-Then start CarPlay and try a Google Maps search + route.
-Watch traffic: sudo $0 status     Undo: sudo $0 down (and set the iPhone back to Automatic)
+Ready: advertising $PREFIX/64 + DNS on $WIFI, NAT66 out of $UPLINK.
+On the iPhone: Settings > Wi-Fi > "$CAR_SSID" > Check For Internet Access ON.
+Then start CarPlay and try a Google Maps search + route (keep cellular as is).
+  sudo $0 status   # the iPhone should appear with an ${PREFIX%::}:... address
+  sudo $0 down     # undo
 EOF
 }
 
 status() {
 	if [ ! -f "$STATE/env" ]; then echo "not up"; exit 0; fi
 	. "$STATE/env"
-	echo "since $(cat "$STATE/started")  wifi=$WIFI ($(ipconfig getifaddr "$WIFI" 2>/dev/null || echo no-ip))  uplink=$UPLINK  car_net=$CAR_NET"
-	echo "forwarding=$(sysctl -n net.inet.ip.forwarding)"
-	echo "rules:"; pfctl -a "$ANCHOR" -s nat 2>/dev/null | sed 's/^/  /'
-	echo "NAT states from the car net: $(pfctl -s state 2>/dev/null | grep -c "$(echo "$CAR_NET" | cut -d. -f1-3)\." || true)"
+	echo "since $(cat "$STATE/started")  wifi=$WIFI  uplink=$UPLINK"
+	echo "car DHCP IPv4 on Mac: $(ipconfig getifaddr "$WIFI" 2>/dev/null || echo none)"
+	echo "rtadvd: $( [ -s "$STATE/rtadvd.pid" ] && kill -0 "$(cat "$STATE/rtadvd.pid")" 2>/dev/null && echo running || echo NOT running)"
+	echo "ip6 forwarding=$(sysctl -n net.inet6.ip6.forwarding)  v6 default via $(v6_default interface)"
+	echo "clients on $PREFIX/64 (iPhone = SLAAC address):"
+	ndp -an | awk -v p="${PREFIX%::}:" -v w="$WIFI" 'index($1,p)==1 && $3==w {print "  " $1, $2}'
+	echo "NAT66 states: $(pfctl -s state 2>/dev/null | grep -c "${PREFIX%::}:" || true)"
+	echo "other car-net neighbours (IPv4):"; arp -an -i "$WIFI" 2>/dev/null | sed 's/^/  /'
 }
 
 down() {
 	[ -f "$STATE/env" ] && . "$STATE/env" || true
+	[ -s "$STATE/rtadvd.pid" ] && kill "$(cat "$STATE/rtadvd.pid")" 2>/dev/null || true
 	pfctl -a "$ANCHOR" -F all 2>/dev/null || true
 	[ -n "${TOKEN:-}" ] && pfctl -X "$TOKEN" 2>/dev/null || true
-	sysctl -w net.inet.ip.forwarding=0 >/dev/null
+	sysctl -w net.inet6.ip6.forwarding=0 >/dev/null
+	[ -n "${WIFI:-}" ] && ifconfig "$WIFI" inet6 "$MYV6" -alias 2>/dev/null || true
+	[ "${ADDED_V6DEF:-0}" = 1 ] && route -n delete -inet6 default >/dev/null 2>&1 || true
 	rm -rf "$STATE"
-	echo "NAT removed, forwarding off. The Mac stays on the car Wi-Fi until you switch networks."
-	echo "iPhone: set the car network's Configure IP and DNS back to Automatic."
+	echo "Undone: rtadvd stopped, NAT66 removed, forwarding off, ULA address removed."
+	echo "The Mac stays on the car Wi-Fi until you switch networks."
 }
 
 case ${1:-} in

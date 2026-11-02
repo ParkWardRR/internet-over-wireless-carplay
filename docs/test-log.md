@@ -1,25 +1,22 @@
 # Test log
 
-One row per test. Put the PSK, VIN and MACs in `secrets/`, never here.
+One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never here.
 
 | Date | Phase | Setup | Result | Notes |
 |---|---|---|---|---|
-| | P0 | iPhone car-network details | | |
+| 2026-11-01 | P0 | iPhone → Settings → Wi-Fi → car network | CarPlay page: no IP/router/DNS fields, no password field. **Weak Security** label. Has **Check For Internet Access** toggle + Manage CarPlay | Manual router on the phone is impossible → route must come from the network (IPv6 RA) |
 
-## P0 — iPhone, car network details
-
-Settings → Wi-Fi → (i) next to the car SSID.
+## P0 — iPhone, car network
 
 | Field | Value |
 |---|---|
-| SSID pattern | |
-| IP address | |
-| Subnet mask | |
-| Router | (expected empty) |
-| DNS | |
-| Password revealable? | |
+| SSID pattern | `BMW<5 digits> CarPlay` |
+| Security | "Weak Security" (WPA/TKIP or WPA/WPA2 mixed, to confirm in P1) |
+| IP settings | not shown for CarPlay networks |
+| Password revealable? | no |
+| Check For Internet Access | present; **turn it on** for P2 |
+| Head unit | factory NBT EVO |
 | iOS version | |
-| Head unit (NBT EVO ID5/ID6 / retrofit) | |
 
 Offline maps: download the area in Google Maps (and Apple Maps), go to the garage, Airplane mode + Wi-Fi to the car only, try search + route.
 
@@ -32,23 +29,29 @@ sudo wdutil info                     # current link
 system_profiler SPAirPortDataType | sed -n '/Other Local Wi-Fi Networks/,$p' | grep -A8 -i carplay
 ```
 
-Record band, channel (DFS?), PHY mode, security (WPA2/WPA3), BSSID OUI.
+Record band, channel (DFS?), PHY mode, security (WPA/WPA2, TKIP/CCMP), BSSID OUI.
 
-## P2 — MacBook proof of concept
+## P2 — MacBook proof of concept (IPv6 RA)
 
-Scripted: `cp secrets.example.env secrets/carplay.env`, fill in, plug the USB-C Ethernet adapter into the garage LAN, then `sudo scripts/poc-mac-nat.sh up` (`status`, `down`). Manual steps below for reference.
+1. `cp secrets.example.env secrets/carplay.env` and fill in the SSID + PSK.
+2. Plug the USB-C Ethernet adapter into the garage LAN (needs a 172.16.x address and global IPv6).
+3. `sudo scripts/poc-mac-nat.sh up`. It joins the car Wi-Fi, adds `fd5c:ba1e:f32:1::1/64`, starts `rtadvd` (60 s router lifetime, RDNSS 2001:4860:4860::8888 + 2606:4700:4700::1111) and NAT66 out of the Ethernet.
+4. iPhone: Settings → Wi-Fi → car network → **Check For Internet Access ON**. Start CarPlay.
+5. `sudo scripts/poc-mac-nat.sh status`. Success looks like the iPhone listed with an `fd5c:ba1e:f32:1:` address and NAT66 states > 0.
+6. Google Maps on CarPlay: search + route. Record: does it work, latency, CarPlay stable?
+7. `sudo scripts/poc-mac-nat.sh down`.
 
-1. Mac: join the car SSID with the PSK; USB-C Ethernet to the garage LAN.
-2. `sudo sysctl -w net.inet.ip.forwarding=1`
-3. pf NAT (`en7` = Ethernet uplink, `CAR_NET` = car subnet from P0, e.g. `192.168.1.0/24`). This replaces the main pf ruleset until undone:
-   ```sh
-   CAR_NET=192.168.1.0/24
-   echo "nat on en7 from $CAR_NET to any -> (en7)" | sudo pfctl -ef -
-   ```
-4. iPhone, car SSID: Configure IP → Manual, address = a free IP in the car subnet outside its DHCP range, router = the Mac's car-Wi-Fi IP, DNS = 172.16.1.69.
-5. Start CarPlay, open Google Maps, search + route. Note: CarPlay stable? Latency?
-6. Undo: `sudo pfctl -f /etc/pf.conf; sudo pfctl -d; sudo sysctl -w net.inet.ip.forwarding=0`; set the iPhone back to Automatic.
+| Check | Result |
+|---|---|
+| Mac joined car SSID (2nd client allowed) | |
+| Mac got car DHCP IPv4 | |
+| iPhone took the SLAAC address (no client isolation, RA accepted) | |
+| NAT66 states from the iPhone | |
+| Maps search + route over CarPlay | |
+| CarPlay stayed connected | |
+
+If the iPhone takes the address but still says no internet: try the DHCPv4-race fallback (README).
 
 ## P4 — exit test
 
-Drive out with the manual config in place. Time from leaving the garage to Maps updating over cellular.
+Drive out with the box running. Time from leaving the garage to Maps updating over cellular (router lifetime is 60 s).
