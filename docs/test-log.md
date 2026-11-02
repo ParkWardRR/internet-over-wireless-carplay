@@ -54,7 +54,7 @@ Record band, channel (DFS?), PHY mode, security (WPA/WPA2, TKIP/CCMP), BSSID OUI
 | Apple Maps search (some hosts IPv4-only) | |
 | CarPlay stayed connected | |
 
-If the iPhone takes the address but still says no internet: try the DHCPv4-race fallback (README).
+If the iPhone takes the address but still says no internet: try options B and C in [ipv4-options.md](ipv4-options.md).
 
 ### DHCP timing (decides whether the IPv4 race is winnable)
 

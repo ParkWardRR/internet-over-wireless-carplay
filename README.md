@@ -19,7 +19,7 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 | iOS labels the car network **Weak Security**: probably WPA/TKIP or WPA/WPA2 mixed. The bridge box must allow legacy WPA | the iPhone, 2026-11-01 |
 | Home has native IPv6 (Spectrum); Google Maps APIs answer over IPv6 | tested from the Mac |
 
-If iOS still exposes IP settings for the CarPlay network somewhere (Settings → Wi-Fi → Edit → Known Networks), the proven manual-IPv4 setup is enough. If not, the route has to come from the network. **Plan: IPv6 router advertisements.** A box on the car Wi-Fi advertises an IPv6 prefix, a default route and DNS (RDNSS), and NAT66es to the home connection. The car's IPv4 is left alone, so there's no DHCP fight. With Check For Internet Access on, iOS should use it. Fallback if iOS ignores an IPv6-only route: answer DHCPv4 faster than the car, with a router option (racy). **Design, reachability table and the permanent-box recipe: [docs/ipv6-route.md](docs/ipv6-route.md).**
+If iOS still exposes IP settings for the CarPlay network somewhere (Settings → Wi-Fi → Edit → Known Networks), the proven manual-IPv4 setup is enough. If not, the route has to come from the network. **Plan: IPv6 router advertisements.** A box on the car Wi-Fi advertises an IPv6 prefix, a default route and DNS (RDNSS), and NAT66es to the home connection. The car's IPv4 is left alone, so there's no DHCP fight. With Check For Internet Access on, iOS should use it. IPv4 options that work with the car instead of racing its DHCP: [docs/ipv4-options.md](docs/ipv4-options.md). **Design, reachability table and the permanent-box recipe: [docs/ipv6-route.md](docs/ipv6-route.md).**
 
 ```mermaid
 flowchart LR
