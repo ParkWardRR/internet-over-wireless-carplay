@@ -56,6 +56,24 @@ Record band, channel (DFS?), PHY mode, security (WPA/WPA2, TKIP/CCMP), BSSID OUI
 
 If the iPhone takes the address but still says no internet: try the DHCPv4-race fallback (README).
 
+### DHCP timing (decides whether the IPv4 race is winnable)
+
+The car owns IPv4: its head unit is the DHCP server and sends no router option, and iOS hides manual IP settings for CarPlay networks. The only IPv4 way in is answering the phone's DISCOVER faster than the car. Measure the car's reply time while the Mac is on the car Wi-Fi:
+
+```sh
+sudo tcpdump -ni en0 -tttt 'udp port 67 or udp port 68'
+# then on the iPhone: Wi-Fi off/on (or disconnect/reconnect CarPlay)
+```
+
+| Measure | Value |
+|---|---|
+| DISCOVER → car OFFER (ms) | |
+| REQUEST → car ACK (ms) | |
+| Lease time, server identifier (`172.16.224.1`?) | |
+| Does the phone use INIT-REBOOT (REQUEST without DISCOVER) on rejoin? | |
+
+Under a few ms from the car means a box rarely wins; tens of ms or more makes a race plausible.
+
 ## P4 — exit test
 
 Drive out with the box running. Time from leaving the garage to Maps updating over cellular (router lifetime is 60 s).
