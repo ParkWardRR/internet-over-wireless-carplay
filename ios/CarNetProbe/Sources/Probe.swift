@@ -92,6 +92,9 @@ final class Probe {
 				results.append("dns " + r)
 				note("dns " + r)
 			}
+			let b = await Probe.boundCaptive()
+			results.append(b)
+			note(b)
 			for (name, url) in Probe.targets {
 				for wifiOnly in [true, false] {
 					let r = await Probe.fetch(name, url, wifiOnly: wifiOnly)
@@ -113,8 +116,10 @@ final class Probe {
 		note("watch on")
 		watchTask = Task {
 			while !Task.isCancelled {
+				let b = await Probe.boundCaptive()
 				let w = await Probe.fetch("captive", Probe.targets[0].1, wifiOnly: true)
 				let d = await Probe.fetch("captive", Probe.targets[0].1, wifiOnly: false)
+				note("watch " + b)
 				note("watch " + w)
 				note("watch " + d)
 				try? await Task.sleep(for: .seconds(10))
@@ -216,6 +221,42 @@ final class Probe {
 		}
 	}
 
+	// iOS's internet check, bound to Wi-Fi (IP_BOUND_IF). configd gives a
+	// service ranked Never/Scoped only a scoped default route: bound traffic
+	// gets through, everyone else's doesn't. So bound OK + default FAIL means
+	// the network works and iOS keeps apps off it.
+	nonisolated static func boundCaptive() async -> String {
+		let params = NWParameters.tcp
+		params.requiredInterfaceType = .wifi
+		let conn = NWConnection(host: "captive.apple.com", port: 80, using: params)
+		let start = Date()
+		let result: String = await withCheckedContinuation { cont in
+			let once = Once(cont)
+			conn.stateUpdateHandler = { st in
+				switch st {
+				case .ready:
+					let req = "GET /hotspot-detect.html HTTP/1.0\r\nHost: captive.apple.com\r\n\r\n"
+					conn.send(content: Data(req.utf8), completion: .contentProcessed { _ in })
+					conn.receive(minimumIncompleteLength: 1, maximumLength: 8192) { data, _, _, err in
+						let body = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
+						let local = conn.currentPath?.localEndpoint.map { "\($0)" } ?? "?"
+						let remote = conn.currentPath?.remoteEndpoint.map { "\($0)" } ?? "?"
+						once.resume(body.contains("Success")
+							? "Success local=\(local) remote=\(remote)"
+							: "NOT Success \(err.map { "\($0)" } ?? "") local=\(local)")
+					}
+				case .failed(let e): once.resume("FAIL \(e)")
+				case .waiting(let e): once.resume("WAITING \(e)")
+				default: break
+				}
+			}
+			conn.start(queue: DispatchQueue(label: "bound"))
+			DispatchQueue.global().asyncAfter(deadline: .now() + 8) { once.resume("TIMEOUT") }
+		}
+		conn.cancel()
+		return "captive [wifi-bound] \(Int(Date().timeIntervalSince(start) * 1000))ms \(result)"
+	}
+
 	// AI_ADDRCONFIG is what apps use: it tells whether iOS asks for AAAA at all.
 	nonisolated static func resolve(_ host: String) -> String {
 		var hints = addrinfo()
@@ -269,6 +310,22 @@ final class Probe {
 	// SSID digits are the end of the VIN.
 	nonisolated static func redact(_ s: String) -> String {
 		s.replacingOccurrences(of: #"\d{5}"#, with: "#####", options: .regularExpression)
+	}
+}
+
+// Resumes a continuation once, whichever of reply / failure / timeout comes first.
+final class Once: @unchecked Sendable {
+	private let lock = NSLock()
+	private var cont: CheckedContinuation<String, Never>?
+
+	init(_ cont: CheckedContinuation<String, Never>) { self.cont = cont }
+
+	func resume(_ s: String) {
+		lock.lock()
+		let c = cont
+		cont = nil
+		lock.unlock()
+		c?.resume(returning: s)
 	}
 }
 

@@ -45,10 +45,22 @@ Install (Mac, Xcode, iPhone unlocked on the same Wi-Fi or on USB): `scripts/inst
 |---|---|---|
 | Paths (live) | `NWPathMonitor` for any / Wi-Fi / cellular: status, IPv4/IPv6/DNS support, gateways | Wi-Fi path `satisfied` with `v6=true` and a gateway = iOS took our RA. "any" using `en0` = apps will use the car Wi-Fi |
 | Addresses | Phone's own addresses, tagged car net / ULA / global v6 / link-local | Did it take the box's SLAAC prefix? |
-| Probes (**Run probes**) | Six URLs, each fetched Wi-Fi only and the default way, with local/remote address | Wi-Fi-only OK + default FAIL = network fine, iOS policy blocks it. Both OK = done. `v4-only host` needs DNS64/NAT64 |
+| Probes (**Run probes**) | iOS's internet check bound to Wi-Fi (`wifi-bound`), then six URLs each fetched Wi-Fi only and the default way, with local/remote address | See "Reading the probes" below. `v4-only host` needs DNS64/NAT64 |
 | DNS | `getaddrinfo` as apps do it (`AI_ADDRCONFIG`) | No AAAA answers on a ULA-only network = the ULA risk is real; rerun P2 with `PREFIX6=` |
 | Bonjour | CarPlay/AirPlay services and their addresses on the car Wi-Fi | Head unit IPv4/IPv6 addresses |
 | Watch | Internet check every 10 s, both ways, screen kept on | P4 exit test: how long until default flips back to cellular |
 | Share (top right) | The whole log (`carnetprobe.log`) | Save to `secrets/`; also in Files/Finder under the app |
+
+### Reading the probes
+
+iOS decides which network carries ordinary traffic by ranking network services (configd). A service ranked **Never** or **Scoped** keeps its default route, but only as a *scoped* route: traffic bound to that interface gets through, nothing else does ([configd `SCNetworkConfigurationPrivate.h`](https://github.com/apple-oss-distributions/configd/blob/main/SystemConfiguration.fproj/SCNetworkConfigurationPrivate.h), [`ip_plugin.c`](https://github.com/apple-oss-distributions/configd/blob/main/Plugins/IPMonitor/ip_plugin.c)). Wired CarPlay is configured `PrimaryRank = Never` ([`prefsmon.c`](https://github.com/apple-oss-distributions/configd/blob/main/Plugins/PreferencesMonitor/prefsmon.c)); wireless CarPlay very likely gets the same treatment, and "Check For Internet Access" is the obvious candidate for what lifts it. That's inference, not documented.
+
+| `wifi-bound` | `wifi-only` | `default` | Means |
+|---|---|---|---|
+| ✅ | ✅ | ✅ | Done: apps use the car Wi-Fi |
+| ✅ | ✅/❌ | ❌ | Network works; iOS keeps the Wi-Fi service out of the default path (rank Never/Scoped). Try the toggle; nothing on the box side will fix this |
+| ❌ | ❌ | ❌ | Route not taken or broken: check Addresses (SLAAC?), the Wi-Fi path's `gw=`, and the Mac's `status` |
+
+AAAA: configd only asks for AAAA records when a service has an IPv6 **default route**; it never checks whether the prefix is ULA, and Libinfo's `AI_ADDRCONFIG` counts any IPv6 address. So on Darwin a ULA prefix with a default route should get AAAA answers; the DNS row confirms it on the phone.
 
 The Wi-Fi row (name, signal) stays "none" until the app gets the Access Wi-Fi Information capability: accept the latest Program License Agreement on developer.apple.com, then re-enable the entitlement block in `ios/CarNetProbe/project.yml`.
