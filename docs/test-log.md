@@ -4,11 +4,12 @@ One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never he
 
 | Date | Phase | Setup | Result | Notes |
 |---|---|---|---|---|
-| 2026-11-01 | P0 | iPhone → Settings → Wi-Fi → car network | CarPlay page: no IP/router/DNS fields, no password field. **Weak Security** label. Has **Check For Internet Access** toggle + Manage CarPlay | Next: Passwords app → Wi-Fi, and Settings → Wi-Fi → Edit → Known Networks |
+| 2026-11-01 | P0 | iPhone → Settings → Wi-Fi → car network | CarPlay page: no IP/router/DNS fields, no password field. **Weak Security** label. Has a **Check For Internet Access** button + Manage CarPlay | Next: Passwords app → Wi-Fi, and Settings → Wi-Fi → Edit → Known Networks |
 | 2026-11-01 | — | Read the Bimmerfest thread | Car net 172.16.224.0/24, no gateway; 2nd client OK; LTE router at .254 + manual iPhone IP worked (2022); iOS shows the PSK since ~2025 | Script now also offers 172.16.224.254 + NAT44 |
 | 2026-11-01 | — | Re-checked sources (Bimmerfest now bot-walled; used the gearshifters copy, Apple forum 76449, WWDC17 #717, Audi TSB, odhcpd/OpenWrt source) | Subnet, no gateway, 2nd client, 10-char PSK over Bluetooth confirmed. "iOS shows the PSK since 2025" **not** confirmed. Car announces "no internet" in its beacon (Apple Device IE). odhcpd lifetime facts corrected. Mac keychain has no CarPlay network | Docs + script updated: car-subnet guard, `PREFIX6` routed-prefix mode, routermode, forwarding restore |
 | 2026-11-01 | — | CarNet Probe on the iPhone (iOS 27.0.1), home Wi-Fi baseline | All probes OK both ways; `wifi-bound` 38 ms Success; AAAA returned; gateways reported. Log in `secrets/probe-home-baseline.log` | App works on the device; Wi-Fi name blank until the Wi-Fi-info entitlement |
 | 2026-11-01 | — | Read Apple's configd / Libinfo / mDNSResponder / xnu source | Rank `Never`/`Scoped` service gets only a scoped default route (wired CarPlay = `Never`); kernel installs the unscoped default only on configd's default interface; AAAA requested for any IPv6 service with a default route, ULA or not | The likely failure mode is iOS ranking, not the box. Added the `wifi-bound` probe to tell them apart |
+| 2026-11-02 | — | Google search via SerpAPI (~20 queries, EN/DE/ZH), DiPlay issue tracker, iOS 27 beta notes | iOS 27: Check For Internet Access is a button; a passing test reveals **Use For Internet**. DiPlay (non-factory receiver) gets it; iOS re-checks on its own. Nobody has published a separate box on a factory CarPlay network working | Biggest risk narrowed to: does the check pass over IPv6 only? |
 
 ## P0 — iPhone, car network
 
@@ -20,7 +21,8 @@ One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never he
 | Password revealable? | not on the CarPlay page |
 | Settings → Wi-Fi → Edit → ⓘ: listed? Password? Configure IP? | |
 | Passwords app → Wi-Fi: listed? | |
-| Check For Internet Access | present; **turn it on** for P2 |
+| Check For Internet Access | button (iOS 27); tap it in P2 with the box running |
+| Tapping it with no box: what does iOS show? | |
 | Head unit | factory NBT EVO |
 | iOS version | |
 
@@ -55,7 +57,7 @@ Then read the car's beacon flags: `scripts/car-ie.sh` (allow Location for CarIE 
 3. Look before talking. Join the car Wi-Fi by hand, start CarPlay, and capture for two minutes: `sudo tcpdump -ni en0 -w secrets/p2-passive.pcap 'icmp6 or udp port 5353 or udp port 67 or udp port 68'`. Answers: does the head unit send RAs of its own (ICMPv6 type 134)? Which IPv6 addresses does CarPlay use (link-local expected)? What is the head unit's IPv4 address (the docs assume `172.16.224.1`)?
    Watch the phone's side at the same time: `rvictl` capture and iOS logs, see [iphone-diagnostics.md](iphone-diagnostics.md). Run **CarNet Probe** before step 4 for a baseline.
 4. `sudo scripts/poc-mac-nat.sh up`. It joins the car Wi-Fi, adds `fd5c:ba1e:f32:1::1/64`, starts `rtadvd` (60 s router lifetime, RDNSS 2001:4860:4860::8888 + 2606:4700:4700::1111) and NAT66 out of the Ethernet. It stops before touching anything if the Mac's Wi-Fi address isn't in 172.16.224.0/24, because home is 172.16.x too and a failed join would otherwise advertise the route on home Wi-Fi.
-5. iPhone: Settings → Wi-Fi → car network → **Check For Internet Access ON**. Start CarPlay.
+5. Start CarPlay. iPhone: Settings → Wi-Fi → car network → tap **Check For Internet Access**. If **Use For Internet** appears, turn it on.
 6. `sudo scripts/poc-mac-nat.sh status`. Success looks like the iPhone listed with an `fd5c:ba1e:f32:1:` address and NAT66 states > 0.
 7. Google Maps on CarPlay: search + route. Record: does it work, latency, CarPlay stable? Then CarNet Probe → **Run probes**, and share the log into `secrets/`.
 8. `sudo scripts/poc-mac-nat.sh down`.
@@ -66,8 +68,10 @@ Then read the car's beacon flags: `scripts/car-ie.sh` (allow Location for CarIE 
 | Mac got car DHCP IPv4 | |
 | iPhone took the SLAAC address (no client isolation, RA accepted) | |
 | NAT66 states from the iPhone | |
-| Maps search + route over CarPlay, Check For Internet Access **on** | |
+| Check For Internet Access passed? Use For Internet appeared? | |
+| Maps search + route over CarPlay, Use For Internet **on** | |
 | Same with it **off** | |
+| Password field visible on the network page once Use For Internet shows? | |
 | If ULA failed: same with `PREFIX6=` a routed /64 | |
 | Head unit sends its own RAs? (passive capture) | |
 | CarNet Probe: Wi-Fi path status / gateways / "any" path interface | |

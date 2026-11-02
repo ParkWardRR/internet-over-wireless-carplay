@@ -58,7 +58,7 @@ iOS decides which network carries ordinary traffic by ranking network services (
 | `wifi-bound` | `wifi-only` | `default` | Means |
 |---|---|---|---|
 | ✅ | ✅ | ✅ | Done: apps use the car Wi-Fi |
-| ✅ | ✅/❌ | ❌ | Network works; iOS keeps the Wi-Fi service out of the default path (rank Never/Scoped). Try the toggle; nothing on the box side will fix this |
+| ✅ | ✅/❌ | ❌ | Network works; iOS keeps the Wi-Fi service out of the default path (rank Never/Scoped). Tap Check For Internet Access and turn on Use For Internet; nothing on the box side will fix this |
 | ❌ | ❌ | ❌ | Route not taken or broken: check Addresses (SLAAC?), the Wi-Fi path's `gw=`, and the Mac's `status` |
 
 AAAA: configd only asks for AAAA records when a service has an IPv6 **default route**; it never checks whether the prefix is ULA, and Libinfo's `AI_ADDRCONFIG` counts any IPv6 address. So on Darwin a ULA prefix with a default route should get AAAA answers; the DNS row confirms it on the phone.

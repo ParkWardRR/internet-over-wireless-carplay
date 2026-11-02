@@ -9,7 +9,8 @@
 # (home has native IPv6). The car's IPv4 setup is left alone. It also adds
 # 172.16.224.254 + NAT44 for the proven manual-IPv4 setup (Bimmerfest 2022),
 # in case iOS exposes IP settings for the CarPlay network.
-# On the iPhone: Settings > Wi-Fi > the car network > Check For Internet Access ON.
+# On the iPhone: Settings > Wi-Fi > the car network > tap Check For Internet
+# Access; if Use For Internet appears, turn it on.
 #
 #   sudo scripts/poc-mac-nat.sh up       # join car Wi-Fi, RA + NAT66
 #   sudo scripts/poc-mac-nat.sh status   # did the iPhone take an address? NAT states
@@ -132,7 +133,8 @@ EOF
 	cat <<EOF
 
 Ready: advertising $PREFIX/64 + DNS on $WIFI, $(case $PREFIX in fd*) echo NAT66 ;; *) echo routed IPv6 ;; esac) + NAT44 out of $UPLINK.
-On the iPhone: Settings > Wi-Fi > "$CAR_SSID" > Check For Internet Access ON.
+On the iPhone: Settings > Wi-Fi > "$CAR_SSID" > tap Check For Internet Access,
+then turn on Use For Internet if it appears.
 If iOS offers IP settings for it (Settings > Wi-Fi > Edit > Known Networks),
 the proven IPv4 way also works: Configure IP Manual 172.16.224.5 / 255.255.255.0,
 Router $GW4, DNS 1.1.1.1.
