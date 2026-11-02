@@ -63,7 +63,7 @@ P2 answers both in an afternoon with a laptop, so nothing gets bought before the
 
 | Phase | Do | Proves |
 |---|---|---|
-| **P0** | ✅ CarPlay network page checked (no IP settings, Weak Security, Check For Internet Access button). ☐ Settings → Wi-Fi → **Edit** → CarPlay network ⓘ: password? Configure IP? ☐ Passwords app → Wi-Fi. ☐ Tap **Check For Internet Access** now (no box) and note what iOS says. ☐ Offline maps in the garage | The free options, and the PSK |
+| **P0** | ✅ CarPlay network page checked (no IP settings, Weak Security, Check For Internet Access button). ☐ Get the PSK without a jailbreak (routes 1–4 under *Blocker* below): Edit → Known Networks ⓘ, Passwords app, Share Password to the Mac. Note whether Configure IP shows. ☐ Tap **Check For Internet Access** now (no box) and note what iOS says. ☐ Offline maps in the garage | The free options, and the PSK |
 | **P1** | Mac in the garage, car on: scan the car AP (band, channel, security). Commands in [docs/test-log.md](docs/test-log.md) | Box radio requirements (5 GHz? DFS? TKIP?) |
 | **P2** | **MacBook proof of concept**. First a passive capture (does the head unit send RAs? what's its address?), then `sudo scripts/poc-mac-nat.sh up`: the Mac joins the car SSID, runs `rtadvd` (ULA /64, 60 s router lifetime, RDNSS) and NAT66 out of USB-C Ethernet. If the iPhone takes the address but stays offline, rerun with `PREFIX6=` a routed public /64. Watch the phone's side with an `rvictl` capture, iOS logs and the **CarNet Probe** app ([docs/iphone-diagnostics.md](docs/iphone-diagnostics.md)) | Second client allowed, iOS takes the IPv6 route, Check For Internet Access passes → Use For Internet, CarPlay survives, Maps works |
 | **P3** | Permanent box: GL.iNet GL-MT3000 on vanilla OpenWrt as a Wi-Fi client of the car SSID, odhcpd RA + RDNSS + PREF64, routed /64 from OPNsense, DNS64 + NAT64 | Hands-off: car on → internet |
@@ -74,16 +74,19 @@ Car: factory NBT EVO (wireless CarPlay only). Garage: Ethernet, home Wi-Fi and p
 
 ## Blocker: the CarPlay Wi-Fi password (PSK)
 
-The box (and the Mac in P2) has to join the car's Wi-Fi, so it needs the PSK. Where to look, in order:
+The box (and the Mac in P2) has to join the car's Wi-Fi, so it needs the PSK. **No jailbreak needed**: ksweber reports iOS has shown the CarPlay password "in the WIFI properties of iPhone" since early 2025. Try these in order; 1–4 take minutes, in the car with CarPlay connected:
 
 | # | Route | Notes |
 |---|---|---|
-| 1 | Settings → Wi-Fi → **Edit** → Known Networks → ⓘ next to `BMW… CarPlay` → Password | Apple's documented path for saved networks ([104961](https://support.apple.com/en-us/104961)). Unknown whether CarPlay-provisioned networks are listed. May also show Configure IP |
-| 2 | **Passwords app → Wi-Fi** | iOS 18+. Same unknown |
-| 3 | Encrypted Finder backup of the iPhone → decrypt its keychain | Needs a backup decryptor (small Go tool) |
-| 4 | Approach 1b | Avoids the PSK entirely |
+| 1 | Settings → Wi-Fi → **Edit** (top right) → Known Networks → ⓘ next to `BMW… CarPlay` → tap **Password** (Face ID) | Apple's documented path for saved networks ([104961](https://support.apple.com/en-us/104961)). The Edit list may show the classic page that the CarPlay page itself hides |
+| 2 | **Passwords app → Wi-Fi** → `BMW… CarPlay` → Password, or *Show Network QR Code* | iOS 18+ |
+| 3 | On the CarPlay network page, tap **Check For Internet Access** | On iOS 27 a CarPlay page that passes the check shows a Password row ([DiPlay #393](https://github.com/shihabal3amri/DiPlay/issues/393) screenshots). Whether a *failed* check also expands the page is unknown: look |
+| 4 | **Share Password to the Mac.** Mac in the car, iPhone unlocked and on CarPlay. On the Mac, pick `BMW… CarPlay` in the Wi-Fi menu; the iPhone should offer **Share Password**; tap it. The Mac joins, and the PSK lands in its keychain: `security find-generic-password -D "AirPort network password" -a "BMW##### CarPlay" -w` | Apple's standard sharing ([102635](https://support.apple.com/en-us/102635)): Wi-Fi + Bluetooth on, Personal Hotspot off on both, devices close, iPhone unlocked. Untested for CarPlay networks. Even without reading the PSK, the Mac is now on the car Wi-Fi, which is all P2 needs: `poc-mac-nat.sh up` with no `CAR_PSK` uses the current network |
+| 5 | Mac **Passwords app → Wi-Fi** | Only if iCloud Keychain syncs CarPlay networks; this Mac's known-network list didn't have it (2026-11-01), so probably not |
+| 6 | Encrypted local backup of the iPhone (Finder, or `idevicebackup2`) → decrypt `keychain-backup.plist` with the backup password | Works without a jailbreak because it's your own backup, but no maintained open-source tool documents Wi-Fi password extraction for current iOS; it would mean writing a decryptor. Last resort |
+| — | Approach 1b (USB-C Ethernet on the phone) | Needs no PSK at all |
 
-Not on the Mac: this Mac's keychain and preferred-network list have no CarPlay network (checked 2026-11-01), so iCloud Keychain doesn't sync it. Brute force is out: 62^10 keyspace.
+Not possible: sniffing it (the WPA handshake only allows guessing, and 62^10 is out of reach) or reading it from Bluetooth (the iAP2 link is encrypted).
 
 ## Rules
 

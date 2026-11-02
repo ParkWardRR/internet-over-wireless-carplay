@@ -16,7 +16,8 @@
 #   sudo scripts/poc-mac-nat.sh status   # did the iPhone take an address? NAT states
 #   sudo scripts/poc-mac-nat.sh down     # undo (the Mac stays on the car Wi-Fi)
 #
-# Needs secrets/carplay.env (gitignored): CAR_SSID, CAR_PSK.
+# Joins with CAR_SSID/CAR_PSK from secrets/carplay.env (gitignored), or, with
+# no PSK, uses the network the Mac is already on (joined via Share Password).
 # Optional: UPLINK=en7 to pick the wired interface by hand.
 # Optional: PREFIX6=2603:8003:4a00:d7ca:: to advertise a routed public /64
 # instead of the ULA (no NAT66; needs an OPNsense static route + LAN rule,
@@ -57,9 +58,10 @@ find_uplink() {
 v6_default() { route -n get -inet6 default 2>/dev/null | awk -v k="$1:" '$1==k{print $2}'; }
 
 up() {
-	[ -f "$HERE/secrets/carplay.env" ] || die "missing $HERE/secrets/carplay.env (CAR_SSID, CAR_PSK)"
-	. "$HERE/secrets/carplay.env"
-	[ -n "${CAR_SSID:-}" ] && [ -n "${CAR_PSK:-}" ] || die "CAR_SSID and CAR_PSK must be set"
+	# No PSK needed if the Mac is already on the car Wi-Fi (e.g. joined via the
+	# iPhone's "Share Password" prompt): the subnet check below still applies.
+	[ ! -f "$HERE/secrets/carplay.env" ] || . "$HERE/secrets/carplay.env"
+	CAR_SSID=${CAR_SSID:-the car network}
 	[ ! -f "$STATE/env" ] || die "already up; run down first"
 
 	WIFI=$(wifi_if); [ -n "$WIFI" ] || die "no Wi-Fi interface"
@@ -70,8 +72,12 @@ up() {
 	[ "$GW6IF" = "$UPLINK" ] || die "IPv6 default route is via '${GW6IF:-none}', not $UPLINK"
 	echo "Wi-Fi: $WIFI   uplink: $UPLINK   IPv6 gateway: $GW6"
 
-	echo "Joining \"$CAR_SSID\"..."
-	networksetup -setairportnetwork "$WIFI" "$CAR_SSID" "$CAR_PSK" || die "join failed (wrong PSK, or the car refuses a second client?)"
+	if [ -n "${CAR_PSK:-}" ]; then
+		echo "Joining \"$CAR_SSID\"..."
+		networksetup -setairportnetwork "$WIFI" "$CAR_SSID" "$CAR_PSK" || die "join failed (wrong PSK, or the car refuses a second client?)"
+	else
+		echo "No CAR_PSK: using the Wi-Fi network the Mac is already on"
+	fi
 	i=0; MYIP=
 	while [ $i -lt 30 ]; do
 		MYIP=$(ipconfig getifaddr "$WIFI" 2>/dev/null || true)
