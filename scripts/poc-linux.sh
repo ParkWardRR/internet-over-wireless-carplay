@@ -192,7 +192,9 @@ status() {
 
 down() {
 	[ -f "$STATE/env" ] && . "$STATE/env" || true
-	[ -s "$STATE/radvd.pid" ] && kill "$(cat "$STATE/radvd.pid")" 2>/dev/null || true
+	# radvd sends a final RA with router lifetime 0 on SIGTERM ("goodbye"), so the
+	# iPhone drops the route at once; give it a moment before leaving the Wi-Fi.
+	[ -s "$STATE/radvd.pid" ] && kill "$(cat "$STATE/radvd.pid")" 2>/dev/null && sleep 1 || true
 	for t in iptables ip6tables; do
 		$t -t nat -D POSTROUTING -j "$CHAIN" 2>/dev/null || true
 		$t -t nat -F "$CHAIN" 2>/dev/null || true
