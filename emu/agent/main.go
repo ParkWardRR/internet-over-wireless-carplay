@@ -5,6 +5,7 @@
 //
 //	emuagent ev <event> [detail...]
 //	emuagent wait <condition> [car] [timeout_s]
+//	emuagent rssi <phy> <dBm>        set how strongly every radio hears <phy>
 //
 // Conditions: box-assoc, box-disassoc, phone-assoc A|B, phone-disassoc A|B,
 // phone-route A|B, phone-noroute A|B. Each prints "EV <t> <event> ..." when
@@ -127,6 +128,23 @@ func main() {
 	switch os.Args[1] {
 	case "ev":
 		ev(os.Args[2:]...)
+	case "rssi":
+		// mac80211_hwsim: every receiver hears a radio at that radio's rx_rssi
+		// plus its tx power. The debugfs file parses unsigned, so write the
+		// two's complement; the driver casts it back to int.
+		if len(os.Args) != 4 {
+			os.Exit(2)
+		}
+		v, err := strconv.ParseInt(os.Args[3], 10, 64)
+		if err != nil || v >= 0 || v < -100 {
+			fmt.Fprintln(os.Stderr, "rssi: want -100..-1 dBm")
+			os.Exit(2)
+		}
+		p := "/sys/kernel/debug/ieee80211/" + os.Args[2] + "/hwsim/rx_rssi"
+		if err := os.WriteFile(p, []byte(strconv.FormatUint(uint64(v), 10)), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "wait":
 		if len(os.Args) < 3 {
 			os.Exit(2)

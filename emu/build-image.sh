@@ -38,8 +38,9 @@ cp "$KEY.pub" "$FILES/etc/dropbear/authorized_keys"
 chmod 600 "$FILES/etc/dropbear/authorized_keys"
 mkdir -p "$FILES/root/carplay"
 cp /work/scripts/openwrt-carplay.sh "$FILES/root/carplay/"
-mkdir -p "$FILES/usr/bin"
+mkdir -p "$FILES/usr/bin" "$FILES/usr/sbin"
 install -m 755 "$OUT/emuagent" "$FILES/usr/bin/emuagent"
+install -m 755 "$OUT/carplayd" "$FILES/usr/sbin/carplayd"
 
 cd "$CACHE/$IB"
 make -s image PROFILE=generic PACKAGES="$PACKAGES" FILES="$FILES" \

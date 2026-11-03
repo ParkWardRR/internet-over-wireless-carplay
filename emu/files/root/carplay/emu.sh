@@ -18,6 +18,7 @@
 #
 #   emu.sh setup                    build the topology (once per boot)
 #   emu.sh box-apply A|B            configure the box for one car (openwrt-carplay.sh)
+#   emu.sh box-carplayd A [B]       run carplayd on the box instead
 #   emu.sh car A|B on|off|power <dBm>|range in|out
 #   emu.sh phone A|B join|leave|check
 #   emu.sh wait <condition> <timeout_s>   box-assoc|box-disassoc|phone-route A|B|phone-noroute A|B
@@ -33,6 +34,7 @@ psk()  { case $1 in A) echo "Emu1Test2A" ;; B) echo "Emu3Test4B" ;; esac; }
 chan() { case $1 in A) echo "${CAR_A_CHAN:-11}" ;; B) echo "${CAR_B_CHAN:-11}" ;; esac; }
 lc()   { echo "$1" | tr AB ab; }
 freq() { echo $(( 2407 + 5 * $(chan "$1") )); }
+cidx() { [ "$1" = A ] && echo 1 || echo 2; }
 # phy name for hwsim radio index $1 (survives moves between namespaces)
 phy() {
 	for ns in "" carA carB phoneA phoneB; do
@@ -115,6 +117,40 @@ box_apply() {
 	ev box_applied "$1"
 }
 
+# The box runs carplayd instead of the netifd/odhcpd config: carplayd owns the
+# radio (its own STA + wpa_supplicant), fw4 only does the zone and NAT66.
+#   emu.sh box-carplayd A [B]      cars it should serve (A has priority)
+box_carplayd() {
+	[ $# -ge 1 ] || die "box-carplayd A [B]"
+	uci set wireless.radio0.disabled='1'; uci commit wireless; wifi reload 2>/dev/null; sleep 1
+	uci -q batch <<EOF
+delete firewall.carplay
+set firewall.carplay=zone
+set firewall.carplay.name='carplay'
+add_list firewall.carplay.device='phy0-sta0'
+set firewall.carplay.input='ACCEPT'
+set firewall.carplay.output='ACCEPT'
+set firewall.carplay.forward='REJECT'
+delete firewall.carplay_wan
+set firewall.carplay_wan=forwarding
+set firewall.carplay_wan.src='carplay'
+set firewall.carplay_wan.dest='wan'
+EOF
+	wanz=$(uci show firewall | sed -n "s/^firewall\.\([^.]*\)\.name='wan'$/\1/p" | head -1)
+	uci set "firewall.$wanz.masq6=1"; uci commit firewall; /etc/init.d/firewall restart 2>/dev/null
+	{
+		echo "phy = $(phy 0)"; echo "sta = phy0-sta0"; echo "dns = 2001:db8:ffff::53"
+		echo "events = $STATE/carplayd.events"; echo "hunt = ${CARPLAYD_HUNT:-1s}"
+		for id in "$@"; do
+			echo "[car $id]"; echo "ssid = $(ssid "$id")"; echo "psk = $(psk "$id")"; echo "channel = $(chan "$id")"
+			[ "$id" = A ] && echo "priority = 1"
+		done
+	} > /etc/carplayd.conf
+	carplayd -c /etc/carplayd.conf -check >/dev/null || die "carplayd config invalid"
+	(carplayd -c /etc/carplayd.conf >"$STATE/carplayd.log" 2>&1 </dev/null &)
+	ev box_carplayd "$@"
+}
+
 car() {
 	id=$1 action=$2 ns=car$1 dev=car-$(lc "$1")0
 	case $action in
@@ -143,6 +179,10 @@ EOF
 		nsx "$ns" hostapd -B -P "$STATE/hostapd-$id.pid" "$STATE/hostapd-$id.conf" >"$STATE/hostapd-$id.log" 2>&1 \
 			|| { cat "$STATE/hostapd-$id.log"; die "hostapd $id failed"; }
 		nsx "$ns" ip addr add 172.16.224.1/24 dev "$dev"
+		# Signal = this radio's rx_rssi + tx power; pin tx power to 0 so
+		# "car X signal N" sets what everyone hears directly. -45 dBm = parked.
+		nsx "$ns" iw dev "$dev" set txpower fixed 0
+		emuagent rssi "$(phy "$(cidx "$id")")" "${CAR_SIGNAL:--45}"
 		nsx "$ns" dnsmasq --conf-file=/dev/null --no-resolv --no-hosts --port=0 --pid-file="$STATE/dnsmasq-$id.pid" \
 			--interface="$dev" --bind-interfaces --dhcp-range=172.16.224.100,172.16.224.200,255.255.255.0,1h \
 			--dhcp-option=3 --dhcp-option=6 --dhcp-leasefile="$STATE/leases-$id"
@@ -155,9 +195,13 @@ EOF
 		ev car_off "$id"
 		;;
 	range)
-		idx=$( [ "$id" = A ] && echo 1 || echo 2 ); cabin=$( [ "$id" = A ] && echo 2 || echo 4 )
+		idx=$(cidx "$id"); cabin=$( [ "$id" = A ] && echo 2 || echo 4 )
 		case $3 in in) setgroup "$idx" $((cabin | 1)) ;; out) setgroup "$idx" "$cabin" ;; *) die "range in|out" ;; esac
 		ev car_range "$id" "$3"
+		;;
+	signal)
+		emuagent rssi "$(phy "$(cidx "$id")")" "$3" || die "signal -100..-1"
+		ev car_signal "$id" "$3"
 		;;
 	power)
 		nsx "$ns" iw dev "$dev" set txpower fixed "$(( $3 * 100 ))"
@@ -197,6 +241,7 @@ phone() {
 case ${1:-} in
 	setup) setup ;;
 	box-apply) box_apply "$2" ;;
+	box-carplayd) shift; box_carplayd "$@" ;;
 	car) car "$2" "$3" "${4:-}" ;;
 	phone) phone "$2" "$3" ;;
 	# Timing-critical polling (20 ms, ms timestamps) is done by the Go agent.
