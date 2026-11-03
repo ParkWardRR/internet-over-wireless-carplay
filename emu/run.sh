@@ -12,12 +12,13 @@ REPO=$(pwd)
 CACHE=$HOME/builds/.cache
 KEY=$CACHE/carplay-emu/id_ed25519
 PORT=${EMU_SSH_PORT:-2290}
-NAME=carplay-emu-vm
+NAME=${EMU_NAME:-carplay-emu-vm}
 
 case ${1:-} in
 build)
 	mkdir -p "$CACHE/go" emu/out
-	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/emu/agent -e CGO_ENABLED=0 docker.io/library/golang:1.25 go build -trimpath -o /work/emu/out/emuagent .
+	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/carplayd docker.io/library/golang:1.26 sh -c 'go test ./... && CGO_ENABLED=0 go build -trimpath -o /work/emu/out/carplayd . && CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -o /work/emu/out/carplayd-arm64 .'
+	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/emu/agent -e CGO_ENABLED=0 docker.io/library/golang:1.26 go build -trimpath -o /work/emu/out/emuagent .
 	podman run --rm -v "$REPO:/work:Z" -v "$CACHE:/cache:Z" carplay-emu sh /work/emu/build-image.sh ;;
 boot)
 	cp emu/out/openwrt.img emu/out/run.img
@@ -36,7 +37,7 @@ console)
 	shift; printf "%s\n" "$*" | podman exec -i "$NAME" socat -t 3 - UNIX-CONNECT:/vm/console.sock >/dev/null ;;
 test)
 	shift; mkdir -p "$CACHE/go" emu/out
-	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/emu/harness -e CGO_ENABLED=0 docker.io/library/golang:1.25 go build -trimpath -o /work/emu/out/emuharness .
+	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/emu/harness -e CGO_ENABLED=0 docker.io/library/golang:1.26 go build -trimpath -o /work/emu/out/emuharness .
 	exec emu/out/emuharness -repo "$REPO" "$@" ;;
 stop)
 	podman rm -f "$NAME" >/dev/null 2>&1 || true; echo stopped ;;
