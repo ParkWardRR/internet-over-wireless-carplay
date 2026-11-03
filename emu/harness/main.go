@@ -375,8 +375,8 @@ var targets = map[string]float64{
 	"car_on→box_assoc":           1.5,
 	"carB_on→box_assoc":          1.5,
 	"box_assoc→phone_route":      4,
-	"out_of_range→phone_noroute": 2,
-	"below_leave→phone_noroute":  5, // leave_for (3 s) + goodbye
+	"out_of_range→phone_noroute": 21, // abrupt loss: no goodbye can reach the phone; bounded by the 20 s router lifetime
+	"below_leave→phone_noroute":  5,  // leave_for (3 s) + goodbye
 	"back_in_range→box_assoc":    1.5,
 	"above_rejoin→box_assoc":     2.5,
 }
@@ -610,11 +610,23 @@ func restart(s *session) (map[string]float64, error) {
 	if err := up(s); err != nil {
 		return m, err
 	}
-	if err := s.must(E + " carplayd-restart && " + E + " wait box-assoc 60"); err != nil {
+	if err := s.must(E + " carplayd-restart"); err != nil {
 		return m, err
 	}
-	s.pull()
+	// Its old wpa_supplicant keeps the association, so wait for the NEW carplayd
+	// to say it serves (it restarts wpa_supplicant and re-joins first).
+	started, _ := s.last("carplayd_started")
+	for i := 0; i < 60; i++ {
+		s.pull()
+		if _, ok := s.first(started.T, func(e event) bool { return e.Name == "carplayd_serving" }); ok {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 	s.after(m, "carplayd_started→serving", "carplayd_started", "", "carplayd_serving")
+	if _, ok := m["carplayd_started→serving"]; !ok {
+		return m, fmt.Errorf("restarted carplayd did not serve within 30 s")
+	}
 	if c, ok := s.last("carplayd_serving"); !ok || len(c.Args) < 2 || c.Args[1] != "fd5c:ba1e:f32:a::/64" {
 		return m, fmt.Errorf("not serving car A's prefix after restart: %+v", c)
 	}
