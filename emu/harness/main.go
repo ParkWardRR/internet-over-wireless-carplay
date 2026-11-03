@@ -347,14 +347,24 @@ func bothOn(s *session) (map[string]float64, error) {
 	if err := s.must(s.boxCmd("A", "B") + " && sleep 2 && " + E + " car B on && " + E + " car A on && " + E + " wait box-assoc 60"); err != nil {
 		return m, err
 	}
+	// Whichever beacon came first, priority (A) should win within the grace period.
+	s.must("sleep 8")
 	s.pull()
-	c, ok := s.last("carplayd_connected")
+	c, ok := s.last("carplayd_serving")
 	if !ok || len(c.Args) == 0 {
-		return m, fmt.Errorf("no carplayd_connected event")
+		return m, fmt.Errorf("no carplayd_serving event")
 	}
-	m["chose_A"] = 0
+	m["serving_A_after_8s"] = 0
 	if c.Args[0] == "A" {
-		m["chose_A"] = 1
+		m["serving_A_after_8s"] = 1
+	}
+	if first, ok := s.first(0, func(e event) bool { return e.Name == "carplayd_serving" }); ok && first.Args[0] == "B" {
+		if sw, ok := s.first(0, func(e event) bool { return e.Name == "carplayd_switch" }); ok {
+			m["preempt_B→A"] = sw.T - first.T
+		}
+	}
+	if m["serving_A_after_8s"] != 1 {
+		return m, fmt.Errorf("still serving %s after 8 s; A has priority", c.Args[0])
 	}
 	s.after(m, "both_on→box_assoc", "car_on", "A", "box_assoc")
 	return m, nil
@@ -603,8 +613,8 @@ func restart(s *session) (map[string]float64, error) {
 	if err := s.must(E + " carplayd-restart && " + E + " wait box-assoc 60"); err != nil {
 		return m, err
 	}
-	s.after(m, "carplayd_started→box_assoc", "carplayd_started", "", "box_assoc")
 	s.pull()
+	s.after(m, "carplayd_started→serving", "carplayd_started", "", "carplayd_serving")
 	if c, ok := s.last("carplayd_serving"); !ok || len(c.Args) < 2 || c.Args[1] != "fd5c:ba1e:f32:a::/64" {
 		return m, fmt.Errorf("not serving car A's prefix after restart: %+v", c)
 	}

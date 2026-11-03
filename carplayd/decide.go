@@ -110,3 +110,11 @@ func phonesIn(neigh string, prefix netip.Prefix) int {
 	}
 	return n
 }
+
+// preempt lets a higher-priority car take over right after we started serving
+// a lower one, while no phone has appeared yet: when two cars start within
+// seconds of each other, the first beacon heard shouldn't decide. After the
+// grace period, or once a phone is seen, only shouldSwitch applies.
+func preempt(servingPrio, otherPrio int, servingSince, lastPhone, now time.Time, grace time.Duration) bool {
+	return otherPrio > servingPrio && lastPhone.IsZero() && now.Sub(servingSince) < grace
+}

@@ -138,11 +138,11 @@ The simulator can't reproduce brcmfmac/ath11k firmware quirks, iOS behaviour or 
 
 ## Order of work
 
-1. **build-host:** build the Debian hwsim VM + scenario harness (car A from measured parameters; car B as a copy until B1).
-2. **carplayd v0:** hunter + joiner + RA engine + goodbye + NAT66 + JSONL, Debian/simulator backend. Make S1–S4, S9 and S10 pass in the simulator.
-3. **garage-sbc:** B1, B2 (next time each car is on), B3 with stand-ins.
-4. carplayd v1: arbitration (S5, S6, S8), dual-STA if B3 passes, Prometheus, lab pcap ring. Simulator S5–S12. Deploy to garage-sbc in lab mode (B4, B5).
-5. **EWS377** (once you have it running): OpenWrt backend (ubus, fw4 static config), OpenWrt-in-simulator test, then on the wall in the garage. Peer coordination with garage-sbc (S12).
+1. ✅ **build-host emulator** (done differently than planned: the box's own OpenWrt snapshot firmware under KVM with hwsim radios, not a Debian VM; see [emulator.md](emulator.md)). Go harness, 14 scenarios.
+2. ✅ **carplayd** (`carplayd/`): hunter, joiner, RA engine, goodbye, hysteresis, arbitration (S5/S8), phone tracking, NAT66 (ip6tables), wpa_supplicant restart, metrics, unknown-channel hunting. Unit-tested; emulator results in [emulator-results.md](emulator-results.md).
+3. **garage-sbc:** ✅ carplayd deployed (`scripts/deploy-carplayd-sbc.sh`, replaces `carplay-box.sh`; F22 on channel 0 = any until B1). Still to do with the cars: B1, B2, then B3 with stand-ins.
+4. Next: dual-STA if B3 passes, lab pcap ring, B4/B5 on the real cars.
+5. **EWS377** (once you have it running): carplayd already runs on the OpenWrt snapshot firmware in the emulator: its own wpa_supplicant on a radio netifd leaves alone, fw4 zone + masq6, procd init (`carplayd/dist/carplayd.init`). On the device: check ath11k STA with NSS offload, `iw phy` limits, then mount it in the garage. Peer coordination with garage-sbc (S12).
 6. **Production mode:** polling trimmed to presence + RSSI, captures off, metrics and alerts kept.
 
 ## Open questions

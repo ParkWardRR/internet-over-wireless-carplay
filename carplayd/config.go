@@ -44,7 +44,8 @@ type Config struct {
 	Hunt       time.Duration // scan period while not serving
 	Poll       time.Duration // signal poll period while serving
 	LeaveFor   time.Duration // how long below Leave before leaving
-	RAInterval time.Duration // unsolicited RA period
+	RAInterval time.Duration // unsolicited RA period once a phone is on the car
+	RAEager    time.Duration // unsolicited RA period while no phone is on the car yet
 	RouterLife time.Duration // RA router lifetime
 	DNS        []netip.Addr  // RDNSS servers
 	EventsPath string        // EV lines are appended here too
@@ -60,7 +61,7 @@ func defaultConfig() Config {
 	return Config{
 		Phy: "phy0", STA: "phy0-sta0", CtrlDir: "/var/run/carplayd",
 		Hunt: time.Second, Poll: time.Second, LeaveFor: 3 * time.Second,
-		RAInterval: 3 * time.Second, RouterLife: 20 * time.Second, // 20 s: an abrupt drive-out (no goodbye possible) strands the phone at most this long
+		RAInterval: 3 * time.Second, RAEager: time.Second, RouterLife: 20 * time.Second, // 20 s: an abrupt drive-out (no goodbye possible) strands the phone at most this long
 		DNS:       []netip.Addr{netip.MustParseAddr("2001:4860:4860::8888"), netip.MustParseAddr("2606:4700:4700::1111")},
 		WPABinary: "wpa_supplicant",
 		NAT66:     "none", IdleSwitch: time.Minute,
@@ -174,6 +175,8 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 		cfg.Poll, err = time.ParseDuration(v)
 	case "leave_for":
 		cfg.LeaveFor, err = time.ParseDuration(v)
+	case "ra_eager":
+		cfg.RAEager, err = time.ParseDuration(v)
 	case "ra_interval":
 		cfg.RAInterval, err = time.ParseDuration(v)
 	case "router_lifetime":

@@ -54,9 +54,9 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 | **P0** | iPhone checks: CarPlay page, PSK, Configure IP | ✅ PSK and Configure IP via Edit → Known Networks |
 | **P1** | Read the car AP: band, security, beacon flags (`poc-linux.sh ie`) | ✅ 2.4 GHz ch 11, WPA/WPA2 TKIP, Interworking Internet = 0 |
 | **P2** | Proof of concept: garage-sbc in the car, `poc-linux.sh up`; Check For Internet Access → Use For Internet; Maps | ✅ works; traffic, latency and goodbye RA checked |
-| **P3** | Permanent box. **Interim: garage-sbc in the garage, automatic** (`scripts/carplay-box.sh`: NM auto-joins the car Wi-Fi, a dispatcher hook starts radvd + NAT). **Final: an OpenWrt router** ([docs/openwrt-box.md](docs/openwrt-box.md), `scripts/openwrt-carplay.sh`) | interim installed 2026-11-03; OpenWrt to do |
+| **P3** | Permanent box. **Interim: garage-sbc in the garage, automatic** (`scripts/carplay-box.sh`: NM auto-joins the car Wi-Fi, a dispatcher hook starts radvd + NAT). **Final: an OpenWrt router** ([docs/openwrt-box.md](docs/openwrt-box.md), `scripts/openwrt-carplay.sh`) | **carplayd** running on garage-sbc since 2026-11-03 (replaced carplay-box.sh); OpenWrt/EWS377 to do |
 | **L / P** | **Lab telemetry, then fast connect / leave / reconnect for one or both cars** on the EnGenius EWS377AP (OpenWrt, IPQ8072A): [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | planned |
-| **2C** | **Two cars** (F32 + F22): per-car ULA, no IPv4 on car links, carplayd, build-host hwsim simulator, F22 survey from garage-sbc ([docs/two-cars.md](docs/two-cars.md)) | planned |
+| **2C** | **Two cars** (F32 + F22): per-car ULA, no IPv4 on car links, carplayd, build-host hwsim simulator, F22 survey from garage-sbc ([docs/two-cars.md](docs/two-cars.md)) | carplayd handles both; F22 channel + survey pending |
 | **P4** | Exit test: drive out, time the return to cellular (60 s router lifetime) | to do |
 | **P4b** | Restart test: does iOS remember *Use For Internet* across car restarts? | to do |
 | **P5** | OBD ENET exploration | optional |
