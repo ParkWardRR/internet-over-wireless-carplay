@@ -1,5 +1,7 @@
 # Plan: lab telemetry, then fast connect / disconnect / reconnect
 
+Two-car design and the controller (`carplayd`): [two-cars.md](two-cars.md).
+
 P2 proved the route ([findings.md](findings.md)). This plan covers the next two phases:
 
 - **Lab / testing.** Poll the car often and capture everything, to build an exact timeline of what happens and where the seconds go.
@@ -54,10 +56,15 @@ The goal is **box associated before the phone joins** (`T_assoc < T_phone`), so 
 | ath11k sched scan / PNO only if the firmware advertises `WMI_TLV_SERVICE_NLO`; AP firmware on IPQ807x is not expected to | `ath11k/mac.c` | check on the box: `iw phy \| grep sched` |
 | ath11k scan dwell defaults: active 50 ms, passive 150 ms per channel | `ath11k/wmi.c` (research agent) | source, not re-checked |
 | OpenWrt STA options: `bssid`, `scan_list` (→ wpa_supplicant `freq_list`); **no `bgscan`, no `autoscan`** in `supplicant.uc` | [supplicant.uc](https://github.com/openwrt/openwrt/blob/main/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/supplicant.uc) | ✅ source |
-| wpa_supplicant `autoscan=periodic:N` (disconnected only), per-network `scan_freq`; Debian 12 and OpenWrt full `wpad` builds include autoscan | hostap `wpa_supplicant.conf`; binary strings on garage-sbc | ✅ |
+| wpa_supplicant `autoscan=periodic:N` (disconnected only) and per-network `scan_freq` exist; **Debian 12's build has autoscan/bgscan, OpenWrt's wpad builds (mini/basic/full) don't**, but **OpenWrt already patches the disconnected rescan interval to 1 s** (`310-rescan_immediately.patch`: `scan_interval = 5` → `1`) | hostap `wpa_supplicant.conf`; garage-sbc binary; [OpenWrt hostapd package](https://github.com/openwrt/openwrt/tree/main/package/network/services/hostapd) | ✅ source |
 | radvd: `MinRtrAdvInterval` ≥ 3 s, `MaxRtrAdvInterval` ≥ 4 s, `MinDelayBetweenRAs` (solicited RAs) configurable; initial RAs ≤ 16 s apart | `radvd.conf(5)` on garage-sbc | ✅ |
 | iPhone sends up to 3 Router Solicitations, 4 s apart, on join (RFC 4861) | RFC 4861 | ✅ |
-| NSS offload accelerates routing/NAT throughput, **not** scanning or association. NSS ECM is not expected to offload NAT66 (masq6) flows; plain STA under NSS Wi-Fi offload has reported traffic problems | qosmio/openwrt-ipq README + issues (agent) | treat as unverified; test with offload on/off |
+| NSS offload accelerates routing/NAT throughput, **not** scanning or association. NSS ECM refuses IPv6 NAT flows (`ecm_ported_ipv6.c`), so NAT66 stays on the CPU, which is fine at Maps scale. ath11k NSS offload does support STA (TKIP mapped); monitor vifs aren't offloaded | research agent, source pins in [two-cars.md](two-cars.md) context | agent-fetched, not re-checked |
+| NetworkManager: a channel lock only **filters** candidates (`freq_list`), it doesn't narrow scans; a BSSID lock turns off bgscan; manual rescans are throttled to one per 1.5 s; a profile is blocked 300 s after 4 failed autoconnects unless `autoconnect-retries 0` | NM 1.42 source (research agent) | agent-fetched |
+| Kernel DAD on the box's link-local delays the first RA by 1–2 s: odhcpd won't send until the link-local isn't tentative (and has a fixed 1 s first-RA timer); radvd retries a failed setup after **10 × MaxRtrAdvInterval**. `accept_dad=0` on the STA avoids both | odhcpd `router.c`, radvd source (research agents) | agent-fetched |
+| The iPhone sends its 3 RS only when *its* link comes up; it doesn't re-solicit when the box joins later. So the unsolicited RA interval bounds the late-box case | Apple IPConfiguration `rtadv.c` (macOS source; iOS assumed same) | agent-fetched |
+| wpa_supplicant bans a network 10→20→30→60…300 s after auth failures; `ENABLE_NETWORK`/`SELECT_NETWORK` clears it | hostap `wpa_supplicant.c` | agent-fetched |
+| On OpenWrt, any AP on the same radio is taken down while the STA hunts | `wpa_supplicant.uc` | agent-fetched |
 
 **Conclusion: no hardware accelerator makes the car show up faster.** Speed comes from:
 1. scanning only channel 11 for the car's SSID, every second (cheap: ~150 ms);
@@ -122,12 +129,12 @@ stateDiagram-v2
 
 | # | Trick | SBC (Debian, NM) | EnGenius (OpenWrt) | Saves |
 |---|---|---|---|---|
-| 1 | **Fast targeted scan while disconnected**: only the car's channel, only its SSID, every 1 s | own poller (`iw … scan freq 2462 ssid …`) → `nmcli con up`; or hand `wlan0` to wpa_supplicant with `autoscan=periodic:1` and `scan_freq=2462` | `scan_list '2462'` (read by `supplicant.uc` into `freq_list`; check whether it's taken from the radio or the iface section); `autoscan=periodic:1` needs a one-line `supplicant.uc` patch or a hook-driven `wpa_cli scan` loop | up to 120 s → ≤ 1.5 s |
+| 1 | **Fast targeted scan while disconnected**: only the car's channel, only its SSID, every 1 s | own poller (`iw … scan freq 2462 ssid …`) → join; or take `wlan0` from NM and run wpa_supplicant with `autoscan=periodic:1`, `disable_scan_offload=1`, per-car `scan_freq` (NM's channel lock doesn't narrow scans) | already rescans every 1 s (OpenWrt patch); add `scan_list '<car channels>'` on the 2.4 GHz radio so each scan is one or two channels (~100 ms) | up to 120 s → ≤ 1.5 s |
 | 2 | **Lock the car**: BSSID + channel | `802-11-wireless.bssid`, `.channel 11`, `.band bg` | `option bssid '<car AP MAC>'` | candidate selection, ~0.1 s |
 | 3 | **Act on CONNECTED, not on DHCP** | static `172.16.224.254/24` + ULA on the connection, BSSID as the "is this the car" guard; DHCP lease optional | ULA + `.254` on a static alias; react to the ubus `wpa_supplicant.<if>` state event | 1–3 s |
-| 4 | **RA ready at link-up, answer RS at once** | radvd pre-started with `IgnoreIfMissing on`, `MinRtrAdvInterval 3; MaxRtrAdvInterval 4; MinDelayBetweenRAs` low; reload on connect to re-send initial RAs | odhcpd `ra_mininterval 3`, `ra_maxinterval 4`; `ubus call odhcpd reload` on connect | ≤ 16 s → ≤ 0.1–4 s |
+| 4 | **RA ready at link-up, answer RS at once** | carplayd sends the RA itself on CONNECTED, then every 3–4 s; `accept_dad=0` on the STA. (radvd fallback: `IgnoreIfMissing on`, `MinRtrAdvInterval 3; MaxRtrAdvInterval 4`, reload on connect) | carplayd as on the SBC; or odhcpd `ra_default 1`, `ra_mininterval 3`, `ra_maxinterval 4`, `accept_dad=0` | ≤ 16 s → ≤ 0.1–4 s |
 | 5 | **Power save off** on the STA | `iw dev wlan0 set power_save off` (NM already sets `wifi.powersave=2` when connected) | `iw dev <sta> set power_save off` from the CONNECTED hook (no UCI option assumed) | tens to hundreds of ms per RS/RA |
-| 6 | **Leave cleanly**: RSSI poll 1 s, below threshold → stop RA daemon (goodbye RA, router lifetime 0), then disconnect | radvd stop on trigger (already in `carplay-box.sh` pre-down) | own poller (no `bgscan` in OpenWrt's scripts); send the goodbye with `odhcpd` stop or a raw RA (`ndisc6`/`rdisc6` tools or a tiny sender) | 60 s → ≤ 2 s |
+| 6 | **Leave cleanly**: RSSI below threshold → goodbye RA (router lifetime 0) while still associated, then disconnect | carplayd `SIGNAL_POLL` 1 s, per-car goodbye | `ubus call wpa_supplicant.<sta> control '{"command":"SIGNAL_MONITOR THRESHOLD=-82 HYSTERESIS=4"}'` (ath11k uses software CQM from beacons; works because OpenWrt has no bgscan) or carplayd `SIGNAL_POLL` | 60 s → ≤ 2 s |
 | 7 | **Precomputed PSK** (`psk=<64 hex>`) | wpa_supplicant config | `option key` with 64-hex | ~10 ms |
 | 8 | **Watchdog**: N failed joins in a row → bounce the radio | systemd timer | procd/cron | recovery from driver stalls |
 
@@ -145,7 +152,7 @@ stateDiagram-v2
 
 - **Single 2.5 GbE port:** it is both the garage-LAN uplink (`wan`, NAT66 out) and management. PoE-powered, ceiling/wall mount near the parking spot.
 - **Radios:** 2.4 GHz radio = car STA, plus a monitor vif on ch 11 in the lab. 5 GHz radio = optional management AP, or off.
-- **Build:** wpa_supplicant must be the full `wpad` (autoscan, bgscan compiled in). Add `conntrack`, `tcpdump`, `iw-full` for the lab image.
+- **Build:** stock `wpad` is fine (1 s rescan built in; autoscan/bgscan aren't needed). Add `conntrack`, `tcpdump`, `iw-full` for the lab image, plus carplayd (static arm64 binary).
 - **Config:** start from `scripts/openwrt-carplay.sh` ([openwrt-box.md](openwrt-box.md)). Extend it with `scan_list`, `bssid`, `powersave`, the RA intervals, and a `carplay-fast` ucode/shell service: per-car hunting, CONNECTED handler, RSSI leave/rejoin, goodbye RA, and the lab JSONL/metrics writer.
 - **Before trusting it:**
   - `iw phy` (sched scan? interface combinations on this firmware);

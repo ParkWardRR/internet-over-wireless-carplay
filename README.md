@@ -56,6 +56,7 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 | **P2** | Proof of concept: garage-sbc in the car, `poc-linux.sh up`; Check For Internet Access → Use For Internet; Maps | ✅ works; traffic, latency and goodbye RA checked |
 | **P3** | Permanent box. **Interim: garage-sbc in the garage, automatic** (`scripts/carplay-box.sh`: NM auto-joins the car Wi-Fi, a dispatcher hook starts radvd + NAT). **Final: an OpenWrt router** ([docs/openwrt-box.md](docs/openwrt-box.md), `scripts/openwrt-carplay.sh`) | interim installed 2026-11-03; OpenWrt to do |
 | **L / P** | **Lab telemetry, then fast connect / leave / reconnect for one or both cars** on the EnGenius EWS377AP (OpenWrt, IPQ8072A): [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | planned |
+| **2C** | **Two cars** (F32 + F22): per-car ULA, no IPv4 on car links, carplayd, build-host hwsim simulator, F22 survey from garage-sbc ([docs/two-cars.md](docs/two-cars.md)) | planned |
 | **P4** | Exit test: drive out, time the return to cellular (60 s router lifetime) | to do |
 | **P4b** | Restart test: does iOS remember *Use For Internet* across car restarts? | to do |
 | **P5** | OBD ENET exploration | optional |
@@ -78,6 +79,7 @@ Sniffing it is out (10 random characters) and so is Bluetooth (encrypted).
 |---|---|
 | [docs/findings.md](docs/findings.md) | What we learned and why it works |
 | [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | Lab telemetry + fast connect/leave/reconnect plan (EnGenius OpenWrt) |
+| [docs/two-cars.md](docs/two-cars.md) | F32 + F22: scenarios, per-car prefixes, carplayd, radios, arbitration, build-host simulator |
 | [docs/test-log.md](docs/test-log.md) | Every test, dated |
 | [docs/ipv6-route.md](docs/ipv6-route.md) | IPv6 design, reachability, permanent-box recipe |
 | [docs/iphone-diagnostics.md](docs/iphone-diagnostics.md) | rvictl capture, iOS logs, CarNet Probe |
