@@ -1,0 +1,16 @@
+[Unit]
+Description=carplayd: internet for iPhones over a parked car's CarPlay Wi-Fi
+Documentation=https://github.com/ParkWardRR/internet-over-wireless-carplay/src/branch/main/docs/two-cars.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/sbin/carplayd -c /etc/carplayd.conf
+Restart=always
+RestartSec=2
+# SIGTERM: goodbye RA, disconnect, stop its wpa_supplicant, remove NAT
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

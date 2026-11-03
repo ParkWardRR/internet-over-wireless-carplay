@@ -1,6 +1,7 @@
 #!/bin/sh
 # Emulator entry point on build-host (inside ~/builds/bmw-f32-carplay-wan):
 #   emu/run.sh build            build emu/out/openwrt.img (OpenWrt snapshot + hwsim)
+#   emu/run.sh carplayd         build only the carplayd binaries (amd64 + arm64)
 #   emu/run.sh boot             boot it under KVM in the background (SSH on :2222)
 #   emu/run.sh ssh [cmd]        run a command in the VM
 #   emu/run.sh console <cmd>    type a command on the serial console (works when the VM network is broken)
@@ -20,6 +21,10 @@ build)
 	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/carplayd docker.io/library/golang:1.26 sh -c 'go test ./... && CGO_ENABLED=0 go build -trimpath -o /work/emu/out/carplayd . && CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -o /work/emu/out/carplayd-arm64 .'
 	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/emu/agent -e CGO_ENABLED=0 docker.io/library/golang:1.26 go build -trimpath -o /work/emu/out/emuagent .
 	podman run --rm -v "$REPO:/work:Z" -v "$CACHE:/cache:Z" carplay-emu sh /work/emu/build-image.sh ;;
+carplayd)
+	# just the binaries: go test, then amd64 + arm64 into emu/out
+	mkdir -p "$CACHE/go" emu/out
+	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/carplayd docker.io/library/golang:1.26 sh -c 'go test ./... && CGO_ENABLED=0 go build -trimpath -o /work/emu/out/carplayd . && CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -o /work/emu/out/carplayd-arm64 .' ;;
 boot)
 	cp emu/out/openwrt.img emu/out/run.img
 	podman rm -f "$NAME" >/dev/null 2>&1 || true

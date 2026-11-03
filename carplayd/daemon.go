@@ -29,6 +29,7 @@ type daemon struct {
 	lastPhone    time.Time
 	lastArbScan  time.Time
 	firstSeen    map[string]time.Time
+	huntTick     int
 	evFile       *os.File
 }
 
@@ -227,10 +228,40 @@ func (d *daemon) netID(id string) int {
 	return -1
 }
 
-func (d *daemon) freqs() string {
+func (d *daemon) freqs() string { return huntFreqs(d.cfg.Cars) }
+
+// tickFreqs is what to scan on hunt tick n: the known channels every tick, and
+// all of 2.4 GHz every 5th tick if some car's channel is unknown (a full sweep
+// takes seconds on real radios; it shouldn't slow down the cars we know).
+func tickFreqs(cars []Car, n int) string {
+	var known []Car
+	unknown := false
+	for _, c := range cars {
+		if c.Freq() == 0 {
+			unknown = true
+		} else {
+			known = append(known, c)
+		}
+	}
+	if unknown && (n%5 == 0 || len(known) == 0) {
+		return huntFreqs(cars)
+	}
+	return huntFreqs(known)
+}
+
+// huntFreqs lists the frequencies to scan: each car's channel, or all of
+// 2.4 GHz (1-13) if any car's channel is unknown.
+func huntFreqs(cars []Car) string {
 	seen := map[int]bool{}
 	var f []string
-	for _, c := range d.cfg.Cars {
+	for _, c := range cars {
+		if c.Freq() == 0 {
+			var all []string
+			for ch := 1; ch <= 13; ch++ {
+				all = append(all, strconv.Itoa(2407+5*ch))
+			}
+			return strings.Join(all, ",")
+		}
 		if !seen[c.Freq()] {
 			seen[c.Freq()] = true
 			f = append(f, strconv.Itoa(c.Freq()))
@@ -243,7 +274,8 @@ func (d *daemon) hunt() {
 	if d.serving != nil {
 		return
 	}
-	d.cmd.cmd("SCAN freq=" + d.freqs()) // FAIL-BUSY just means a scan is already running
+	d.huntTick++
+	d.cmd.cmd("SCAN freq=" + tickFreqs(d.cfg.Cars, d.huntTick)) // FAIL-BUSY just means a scan is already running
 }
 
 func (d *daemon) onScanResults() {
@@ -257,7 +289,8 @@ func (d *daemon) onScanResults() {
 		if _, found := best(c, seen); found {
 			if _, ok := d.firstSeen[c.ID]; !ok {
 				d.firstSeen[c.ID] = now
-				d.ev("seen", c.ID)
+				e, _ := best(c, seen)
+				d.ev("seen", c.ID, strconv.Itoa(e.Freq), strconv.Itoa(e.Signal), e.BSSID)
 			}
 		} else if d.serving == nil || c.ID != d.serving.ID {
 			delete(d.firstSeen, c.ID)

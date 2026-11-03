@@ -24,8 +24,12 @@ type Car struct {
 	Priority int          // higher wins when both cars are seen
 }
 
-// Freq returns the 2.4 GHz centre frequency in MHz.
+// Freq returns the 2.4 GHz centre frequency in MHz, or 0 when the channel is
+// unknown (channel = 0: hunt on every 2.4 GHz channel).
 func (c Car) Freq() int {
+	if c.Channel == 0 {
+		return 0
+	}
 	if c.Channel == 14 {
 		return 2484
 	}
@@ -207,8 +211,8 @@ func setCar(c *Car, k, v string) error {
 		c.PSK = v
 	case "channel":
 		c.Channel = atoi(v)
-		if err == nil && (c.Channel < 1 || c.Channel > 14) {
-			err = fmt.Errorf("channel %d is not 2.4 GHz", c.Channel)
+		if err == nil && (c.Channel < 0 || c.Channel > 14) {
+			err = fmt.Errorf("channel %d is not 2.4 GHz (0 = any)", c.Channel)
 		}
 	case "bssid":
 		c.BSSID = strings.ToLower(v)

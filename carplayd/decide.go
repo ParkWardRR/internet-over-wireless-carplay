@@ -36,7 +36,7 @@ func best(c Car, seen []scanEntry) (scanEntry, bool) {
 	var out scanEntry
 	found := false
 	for _, e := range seen {
-		if e.SSID != c.SSID || e.Freq != c.Freq() {
+		if e.SSID != c.SSID || (c.Freq() != 0 && e.Freq != c.Freq()) {
 			continue
 		}
 		if c.BSSID != "" && !strings.EqualFold(e.BSSID, c.BSSID) {
