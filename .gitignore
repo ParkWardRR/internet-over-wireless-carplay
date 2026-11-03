@@ -3,3 +3,4 @@ secrets/
 *.pcap
 *.pcapng
 ios/CarNetProbe/*.xcodeproj/
+emu/out/

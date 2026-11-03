@@ -1,0 +1,10 @@
+# Toolbox for the OpenWrt emulator on build-host: QEMU (KVM) + OpenWrt Image Builder deps.
+# The Image Builder itself needs python3; nothing in this project is written in it.
+FROM docker.io/library/debian:trixie
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      qemu-system-x86 qemu-system-arm qemu-utils \
+      build-essential gawk gettext libncurses-dev zlib1g-dev libssl-dev xsltproc \
+      rsync wget ca-certificates unzip zstd file perl python3 python3-setuptools \
+      openssh-client iproute2 git socat \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
