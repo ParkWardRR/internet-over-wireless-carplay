@@ -4,6 +4,7 @@
 #   emu/run.sh boot             boot it under KVM in the background (SSH on :2222)
 #   emu/run.sh ssh [cmd]        run a command in the VM
 #   emu/run.sh console <cmd>    type a command on the serial console (works when the VM network is broken)
+#   emu/run.sh test [-scenarios a,b] [-n N]   run the Go scenario harness (fresh VM per run)
 #   emu/run.sh stop             power it off
 set -eu
 cd "$(dirname "$0")/.."
@@ -33,6 +34,10 @@ ssh)
 	shift; exec ssh -q -i "$KEY" -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@127.0.0.1 "$@" ;;
 console)
 	shift; printf "%s\n" "$*" | podman exec -i "$NAME" socat -t 3 - UNIX-CONNECT:/vm/console.sock >/dev/null ;;
+test)
+	shift; mkdir -p "$CACHE/go" emu/out
+	podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/go:Z" -w /work/emu/harness -e CGO_ENABLED=0 docker.io/library/golang:1.25 go build -trimpath -o /work/emu/out/emuharness .
+	exec emu/out/emuharness -repo "$REPO" "$@" ;;
 stop)
 	podman rm -f "$NAME" >/dev/null 2>&1 || true; echo stopped ;;
 *) echo "usage: emu/run.sh build|boot|ssh [cmd]|stop" >&2; exit 2 ;;
