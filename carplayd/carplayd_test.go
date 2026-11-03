@@ -354,3 +354,27 @@ func TestTickFreqs(t *testing.T) {
 		t.Errorf("unknown-only tick: %q", f)
 	}
 }
+
+func TestPreempt(t *testing.T) {
+	t0 := time.Unix(5000, 0)
+	g := 15 * time.Second
+	if !preempt(0, 1, t0, time.Time{}, t0.Add(2*time.Second), g) {
+		t.Error("higher priority car did not preempt within grace")
+	}
+	if preempt(1, 0, t0, time.Time{}, t0.Add(2*time.Second), g) {
+		t.Error("lower priority preempted")
+	}
+	if preempt(0, 1, t0, t0.Add(time.Second), t0.Add(2*time.Second), g) {
+		t.Error("preempted a car with a phone")
+	}
+	if preempt(0, 1, t0, time.Time{}, t0.Add(20*time.Second), g) {
+		t.Error("preempted after the grace period")
+	}
+}
+
+func TestWPAConfigExpiresGoneAPs(t *testing.T) {
+	w := wpaConfig(mustConfig(t, sampleConf))
+	if !strings.Contains(w, "bss_expiration_scan_count=1") {
+		t.Error("cached BSS entries would make a departed car look present")
+	}
+}

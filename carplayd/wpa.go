@@ -148,7 +148,10 @@ func parseKV(r string) map[string]string {
 // all disabled; carplayd enables the one it picks.
 func wpaConfig(cfg Config) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "ctrl_interface=%s\nap_scan=1\nupdate_config=0\n", cfg.CtrlDir)
+	// Forget an AP as soon as one scan of its channel misses it: wpa_supplicant
+	// otherwise keeps it in SCAN_RESULTS for minutes, and a car that has driven
+	// off looks present (found in the emulator: carplayd re-selected a gone car).
+	fmt.Fprintf(&b, "ctrl_interface=%s\nap_scan=1\nupdate_config=0\nbss_expiration_age=10\nbss_expiration_scan_count=1\n", cfg.CtrlDir)
 	for _, c := range cfg.Cars {
 		fmt.Fprintf(&b, "network={\n\tid_str=%q\n\tssid=%q\n\tpsk=%q\n\tkey_mgmt=WPA-PSK\n\tscan_ssid=1\n\tbgscan=\"\"\n\tdisabled=1\n", c.ID, c.SSID, c.PSK)
 		if f := c.Freq(); f != 0 {

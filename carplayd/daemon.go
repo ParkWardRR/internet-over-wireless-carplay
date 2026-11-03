@@ -30,6 +30,8 @@ type daemon struct {
 	lastArbScan  time.Time
 	firstSeen    map[string]time.Time
 	huntTick     int
+	phones       int
+	lastRA       time.Time
 	evFile       *os.File
 }
 
@@ -319,7 +321,11 @@ func (d *daemon) arbitrate(seen []scanEntry, now time.Time) {
 		}
 	}
 	car, e, ok := pick(others, d.held, seen)
-	if !ok || !shouldSwitch(now, d.servingSince, d.lastPhone, d.cfg.IdleSwitch, d.firstSeen[car.ID]) {
+	if !ok {
+		return
+	}
+	if !preempt(d.serving.Priority, car.Priority, d.servingSince, d.lastPhone, now, preemptGrace) &&
+		!shouldSwitch(now, d.servingSince, d.lastPhone, d.cfg.IdleSwitch, d.firstSeen[car.ID]) {
 		return
 	}
 	from := d.serving.ID
@@ -366,7 +372,7 @@ func (d *daemon) startServing(car *Car) {
 		return
 	}
 	d.serving, d.ra, d.below = car, ra, time.Time{}
-	d.servingSince, d.lastPhone = time.Now(), time.Time{}
+	d.servingSince, d.lastPhone, d.phones, d.lastRA = time.Now(), time.Time{}, 0, time.Now()
 	d.m.set(func(m *metrics) { m.serving, m.phones = car.ID, 0 })
 	go ra.serveRS(func(src net.IP) { d.ev("rs", car.ID, src.String()) })
 	if err := ra.advertise(); err != nil {
@@ -411,6 +417,7 @@ func (d *daemon) poll() {
 	d.lastSig = sig
 	if out, err := exec.Command("ip", "-6", "neigh", "show", "dev", d.cfg.STA).Output(); err == nil {
 		n := phonesIn(string(out), d.serving.Prefix)
+		d.phones = n
 		if n > 0 {
 			d.lastPhone = now
 		}
@@ -428,14 +435,17 @@ func (d *daemon) poll() {
 		d.cmd.ok("DISABLE_NETWORK all")
 		return
 	}
-	// With no phone on the served car for a while, look (every 5 s) for
-	// another car someone may be about to drive.
-	if len(d.cfg.Cars) > 1 && now.Sub(d.lastArbScan) >= 5*time.Second {
+	// Look for other cars: every 2 s during the preemption grace period (if a
+	// higher-priority car exists), every 5 s once the served car has had no
+	// phone for idle_switch.
+	if len(d.cfg.Cars) > 1 {
 		quiet := d.servingSince
 		if d.lastPhone.After(quiet) {
 			quiet = d.lastPhone
 		}
-		if now.Sub(quiet) >= d.cfg.IdleSwitch {
+		graceScan := d.lastPhone.IsZero() && now.Sub(d.servingSince) < preemptGrace && d.higherPriorityExists() && now.Sub(d.lastArbScan) >= 2*time.Second
+		idleScan := now.Sub(quiet) >= d.cfg.IdleSwitch && now.Sub(d.lastArbScan) >= 5*time.Second
+		if graceScan || idleScan {
 			d.lastArbScan = now
 			d.cmd.cmd("SCAN freq=" + d.freqs())
 		}
@@ -445,7 +455,7 @@ func (d *daemon) poll() {
 func (d *daemon) loop(stop <-chan os.Signal) {
 	hunt := time.NewTicker(d.cfg.Hunt)
 	pollT := time.NewTicker(d.cfg.Poll)
-	raT := time.NewTicker(d.cfg.RAInterval)
+	raT := time.NewTicker(d.cfg.RAEager)
 	d.ev("start", d.cfg.STA, d.freqs())
 	d.hunt()
 	for {
@@ -483,9 +493,24 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 		case <-pollT.C:
 			d.poll()
 		case <-raT.C:
-			if d.ra != nil {
+			// Eager (every ra_eager) until a phone shows up, then every ra_interval:
+			// a phone whose own Router Solicitation got lost (sent before the
+			// WPA handshake finished) still gets the route within ~1 s.
+			if d.ra != nil && (d.phones == 0 || time.Since(d.lastRA) >= d.cfg.RAInterval) {
 				d.ra.advertise()
+				d.lastRA = time.Now()
 			}
 		}
 	}
+}
+
+const preemptGrace = 15 * time.Second
+
+func (d *daemon) higherPriorityExists() bool {
+	for _, c := range d.cfg.Cars {
+		if c.Priority > d.serving.Priority {
+			return true
+		}
+	}
+	return false
 }
