@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"sync"
@@ -55,7 +56,14 @@ func (m *metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func (m *metrics) listen(addr string) {
-	srv := &http.Server{Addr: addr, Handler: m, ReadHeaderTimeout: 5 * time.Second}
-	go srv.ListenAndServe()
+// listen binds first (so a taken port is reported, not silently ignored),
+// then serves in the background.
+func (m *metrics) listen(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Handler: m, ReadHeaderTimeout: 5 * time.Second}
+	go srv.Serve(ln)
+	return nil
 }

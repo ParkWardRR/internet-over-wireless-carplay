@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"net"
 	"net/netip"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -283,5 +284,73 @@ func TestPhonesInCompressed(t *testing.T) {
 	// fd00:1::5 is NOT in fd00::/64 even though the strings share "fd00:".
 	if n := phonesIn("fd00:1::5 lladdr 02:00:00:00:00:01 REACHABLE\nfd00::7 lladdr 02:00:00:00:00:02 REACHABLE\n", netip.MustParsePrefix("fd00::/64")); n != 1 {
 		t.Errorf("phones = %d, want 1", n)
+	}
+}
+
+func TestUnknownChannel(t *testing.T) {
+	cfg := mustConfig(t, "[car A]\nssid = BMW00001 CarPlay\npsk = 12345678\nchannel = 11\n[car B]\nssid = BMW00002 CarPlay\npsk = 87654321\nchannel = 0\n")
+	b := cfg.Cars[1]
+	if b.Freq() != 0 {
+		t.Fatalf("freq %d", b.Freq())
+	}
+	// Hunting covers all of 2.4 GHz when a channel is unknown.
+	if f := huntFreqs(cfg.Cars); !strings.HasPrefix(f, "2412,") || !strings.HasSuffix(f, ",2472") {
+		t.Errorf("hunt freqs %q", f)
+	}
+	// Car B is matched on any channel; car A only on 11.
+	seen := []scanEntry{{SSID: "BMW00002 CarPlay", Freq: 2437, Signal: -60}, {SSID: "BMW00001 CarPlay", Freq: 2437, Signal: -40}}
+	if c, _, ok := pick(cfg.Cars, map[string]bool{}, seen); !ok || c.ID != "B" {
+		t.Errorf("pick = %v %v (A on the wrong channel must not count)", c.ID, ok)
+	}
+	// No scan_freq for B in the wpa config.
+	w := wpaConfig(cfg)
+	if strings.Count(w, "scan_freq=") != 1 {
+		t.Errorf("want scan_freq only for A:\n%s", w)
+	}
+	if _, err := parseConfig(strings.NewReader("[car A]\nssid = x\npsk = 12345678\nchannel = -1\n")); err == nil {
+		t.Error("negative channel accepted")
+	}
+}
+
+func TestHuntFreqsDedup(t *testing.T) {
+	cfg := mustConfig(t, sampleConf) // A on 11, B on 6
+	if f := huntFreqs(cfg.Cars); f != "2462,2437" {
+		t.Errorf("hunt freqs %q", f)
+	}
+}
+
+func TestExampleConfigParses(t *testing.T) {
+	f, err := os.Open("carplayd.conf.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cfg, err := parseConfig(f)
+	if err != nil {
+		t.Fatalf("example config: %v", err)
+	}
+	if len(cfg.Cars) != 2 || cfg.Cars[1].Channel != 0 || cfg.RouterLife != 20*time.Second {
+		t.Errorf("%+v", cfg)
+	}
+}
+
+func TestTickFreqs(t *testing.T) {
+	cfg := mustConfig(t, "[car A]\nssid = a\npsk = 12345678\nchannel = 11\n[car B]\nssid = b\npsk = 12345678\nchannel = 0\n")
+	full := 0
+	for n := 1; n <= 10; n++ {
+		f := tickFreqs(cfg.Cars, n)
+		if strings.Contains(f, "2412") {
+			full++
+		} else if f != "2462" {
+			t.Errorf("tick %d: %q", n, f)
+		}
+	}
+	if full != 2 {
+		t.Errorf("full sweeps in 10 ticks = %d, want 2", full)
+	}
+	// Only unknown cars: sweep every tick.
+	only := mustConfig(t, "[car B]\nssid = b\npsk = 12345678\nchannel = 0\n")
+	if f := tickFreqs(only.Cars, 1); !strings.Contains(f, "2412") {
+		t.Errorf("unknown-only tick: %q", f)
 	}
 }

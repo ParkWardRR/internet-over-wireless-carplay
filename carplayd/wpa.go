@@ -150,7 +150,10 @@ func wpaConfig(cfg Config) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ctrl_interface=%s\nap_scan=1\nupdate_config=0\n", cfg.CtrlDir)
 	for _, c := range cfg.Cars {
-		fmt.Fprintf(&b, "network={\n\tid_str=%q\n\tssid=%q\n\tpsk=%q\n\tkey_mgmt=WPA-PSK\n\tscan_ssid=1\n\tscan_freq=%d\n\tfreq_list=%d\n\tbgscan=\"\"\n\tdisabled=1\n", c.ID, c.SSID, c.PSK, c.Freq(), c.Freq())
+		fmt.Fprintf(&b, "network={\n\tid_str=%q\n\tssid=%q\n\tpsk=%q\n\tkey_mgmt=WPA-PSK\n\tscan_ssid=1\n\tbgscan=\"\"\n\tdisabled=1\n", c.ID, c.SSID, c.PSK)
+		if f := c.Freq(); f != 0 {
+			fmt.Fprintf(&b, "\tscan_freq=%d\n\tfreq_list=%d\n", f, f)
+		}
 		if c.BSSID != "" {
 			fmt.Fprintf(&b, "\tbssid=%s\n", c.BSSID)
 		}
