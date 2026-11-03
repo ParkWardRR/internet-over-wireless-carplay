@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -49,7 +50,10 @@ func main() {
 		return
 	}
 
-	d := &daemon{cfg: cfg, held: map[string]bool{}}
+	d := &daemon{cfg: cfg, held: map[string]bool{}, firstSeen: map[string]time.Time{}, m: newMetrics()}
+	if cfg.Metrics != "" {
+		d.m.listen(cfg.Metrics)
+	}
 	if cfg.EventsPath != "" {
 		d.evFile, _ = os.OpenFile(cfg.EventsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	}

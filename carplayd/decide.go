@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -69,4 +70,43 @@ func leaveCheck(below time.Time, now time.Time, signal, leave int, leaveFor time
 		below = now
 	}
 	return below, now.Sub(below) >= leaveFor
+}
+
+// shouldSwitch decides whether to leave the car we serve for another one that
+// is also on. Only a single STA serves one car at a time, so: never abandon a
+// car with a phone; switch only when the served car has had no phone for
+// idle, and the other car appeared after we started serving this one (a car
+// that just started probably has a driver getting in). Requiring "appeared
+// later" also stops two phone-less cars from ping-ponging.
+func shouldSwitch(now, servingSince, lastPhone time.Time, idle time.Duration, otherFirstSeen time.Time) bool {
+	if otherFirstSeen.IsZero() || !otherFirstSeen.After(servingSince) {
+		return false
+	}
+	quietSince := servingSince
+	if lastPhone.After(quietSince) {
+		quietSince = lastPhone
+	}
+	return now.Sub(quietSince) >= idle
+}
+
+// phonesIn counts neighbours with an address in prefix that look alive, from
+// `ip -6 neigh show dev X` output. Only phones autoconfigure in our prefix (the
+// head unit didn't on the real car), so this is the phone count.
+func phonesIn(neigh string, prefix netip.Prefix) int {
+	n := 0
+	for _, l := range strings.Split(neigh, "\n") {
+		f := strings.Fields(l)
+		if len(f) == 0 {
+			continue
+		}
+		a, err := netip.ParseAddr(f[0])
+		if err != nil || !prefix.Contains(a) {
+			continue
+		}
+		switch f[len(f)-1] {
+		case "REACHABLE", "STALE", "DELAY", "PROBE":
+			n++
+		}
+	}
+	return n
 }

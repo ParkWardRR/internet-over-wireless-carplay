@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -170,6 +171,7 @@ func detectWith(s *session, env string) (map[string]float64, error) {
 	if err := s.must(env + s.boxCmd("A") + " && sleep 3"); err != nil {
 		return m, err
 	}
+	jitter() // a real car starts at a random moment relative to the box's scan cycle
 	if err := s.must(E + " car A on && " + E + " wait box-assoc 60"); err != nil {
 		return m, err
 	}
@@ -210,8 +212,8 @@ func driveOut(s *session) (map[string]float64, error) {
 	if err := s.must(E + " car A range out && " + E + " wait box-disassoc 60 && " + E + " wait phone-noroute A 180"); err != nil {
 		return m, err
 	}
-	s.between(m, "out_of_range→box_disassoc", "car_range", "box_disassoc", "A")
-	s.between(m, "out_of_range→phone_noroute", "car_range", "phone_noroute", "A")
+	s.after(m, "out_of_range→box_disassoc", "car_range", "A", "box_disassoc")
+	s.after(m, "out_of_range→phone_noroute", "car_range", "A", "phone_noroute")
 	return m, nil
 }
 
@@ -226,7 +228,7 @@ func returnScenario(s *session) (map[string]float64, error) {
 	if err := s.must(E + " car A range in && " + E + " wait box-assoc 60 && " + E + " wait phone-route A 120"); err != nil {
 		return m, err
 	}
-	s.between(m, "back_in_range→box_assoc", "car_range", "box_assoc", "A")
+	s.after(m, "back_in_range→box_assoc", "car_range", "A", "box_assoc")
 	s.between(m, "box_assoc→phone_route", "box_assoc", "phone_route")
 	return m, nil
 }
@@ -237,6 +239,7 @@ func cycle(s *session) (map[string]float64, error) {
 		return m, err
 	}
 	for i := 1; i <= 5; i++ {
+		jitter()
 		if err := s.must(E + " car A on && " + E + " wait box-assoc 60"); err != nil {
 			return m, err
 		}
@@ -529,3 +532,7 @@ func (s *session) after(m map[string]float64, metric, from, car, to string) {
 		m[metric] = b.T - a.T
 	}
 }
+
+// jitter waits a random 0-1 s so car starts don't line up with the box's
+// scan cycle (the harness is otherwise too regular).
+func jitter() { time.Sleep(time.Duration(rand.Int63n(int64(time.Second)))) }
