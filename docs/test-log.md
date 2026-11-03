@@ -11,6 +11,7 @@ One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never he
 | 2026-11-01 | — | Read Apple's configd / Libinfo / mDNSResponder / xnu source | Rank `Never`/`Scoped` service gets only a scoped default route (wired CarPlay = `Never`); kernel installs the unscoped default only on configd's default interface; AAAA requested for any IPv6 service with a default route, ULA or not | The likely failure mode is iOS ranking, not the box. Added the `wifi-bound` probe to tell them apart |
 | 2026-11-02 | — | Google search via SerpAPI (~20 queries, EN/DE/ZH), DiPlay issue tracker, iOS 27 beta notes | iOS 27: Check For Internet Access is a button; a passing test reveals **Use For Internet**. DiPlay (non-factory receiver) gets it; iOS re-checks on its own. Nobody has published a separate box on a factory CarPlay network working | Biggest risk narrowed to: does the check pass over IPv6 only? |
 | 2026-11-02 | — | Read the Bimmerfest thread in full via the r.jina.ai reader proxy; ~10 more searches (BMW forums, Reddit, JA), GitHub code search | **Confirmed success on NBT EVO (Feb 2022)**: Teltonika RUT850 on the CarPlay Wi-Fi at .254, iPhone manual .5 / gw+DNS .254 → internet with CarPlay running. Jan 2025: PSK visible in the iPhone's Wi-Fi properties. No other reports | The `.254` alias + NAT44 in `poc-mac-nat.sh` reproduces that setup if iOS 27 shows Configure IP |
+| 2026-11-02 | P0 | iPhone (iOS 27) → Settings → Wi-Fi → Edit → Known Networks → CarPlay network | **Password shown, with Copy** (no jailbreak). Full settings page incl. Private Wi-Fi Address and **Configure IP**. The phone also knows a second BMW CarPlay network (another car) | PSK in `secrets/carplay.env`. Manual IPv4 (0b) is possible on iOS 27 |
 
 ## P0 — iPhone, car network
 
@@ -19,8 +20,8 @@ One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never he
 | SSID pattern | `BMW<5 digits> CarPlay` |
 | Security | "Weak Security" (WPA/TKIP or WPA/WPA2 mixed, to confirm in P1) |
 | IP settings | not shown for CarPlay networks |
-| Password revealable? | not on the CarPlay page |
-| Settings → Wi-Fi → Edit → ⓘ: listed? Password? Configure IP? | |
+| Password revealable? | not on the CarPlay page; **yes** via Edit → Known Networks (with Copy) |
+| Settings → Wi-Fi → Edit → ⓘ: listed? Password? Configure IP? | listed; password yes; Configure IP yes |
 | Passwords app → Wi-Fi: listed? | |
 | Check For Internet Access | button (iOS 27); tap it in P2 with the box running |
 | Tapping it with no box: what does iOS show? | |
