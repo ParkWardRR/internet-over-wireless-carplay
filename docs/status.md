@@ -1,6 +1,6 @@
 # Status: what we learned, tested, built, plan, open items
 
-*As of 2026-11-03.* Goal: Google Maps (and everything else) on wireless CarPlay in the underground garage, where there's no cellular, for the **F32** (`BMW00001 CarPlay`) and the **F22 M240i** (`BMW00002 CarPlay`).
+*As of 2026-11-03.* Goal: Google Maps (and everything else) on wireless CarPlay in the underground garage, where there's no cellular, for the **F32** (`BMW##### CarPlay`) and the **F22 M240i** (`BMW##### CarPlay`).
 
 ## At a glance
 
