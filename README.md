@@ -6,7 +6,7 @@ Give the iPhone internet while it's on **wireless CarPlay** in the basement gara
 
 A small Linux box in the car (garage-sbc, a Banana Pi, wired to the garage LAN) joins the car's CarPlay Wi-Fi as a second client and advertises an **IPv6 route + DNS** with NAT66 to the home connection. On the iPhone (iOS 27): Settings → Wi-Fi → the CarPlay network → **Check For Internet Access** → **Use For Internet**. Google Maps search and routing then work on CarPlay underground. Nothing on the car changes, and no IP settings change on the phone.
 
-**Full write-up: [docs/findings.md](docs/findings.md).** Raw results: [docs/test-log.md](docs/test-log.md). Run it: `scripts/poc-linux.sh` (see *P2 on garage-sbc* in the test log).
+**Status, plan and open items: [docs/status.md](docs/status.md).** **Full write-up: [docs/findings.md](docs/findings.md).** Raw results: [docs/test-log.md](docs/test-log.md). Run it: `scripts/poc-linux.sh` (see *P2 on garage-sbc* in the test log).
 
 ```mermaid
 flowchart LR
