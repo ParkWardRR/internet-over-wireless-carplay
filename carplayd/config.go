@@ -45,6 +45,10 @@ type Config struct {
 	DNS        []netip.Addr  // RDNSS servers
 	EventsPath string        // EV lines are appended here too
 	WPABinary  string
+	Uplink     string        // interface toward the internet (for nat66)
+	NAT66      string        // "none" (fw4 or someone else does it) or "ip6tables"
+	IdleSwitch time.Duration // serve another car once the served one has had no phone this long
+	Metrics    string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
 	Cars       []Car
 }
 
@@ -52,9 +56,10 @@ func defaultConfig() Config {
 	return Config{
 		Phy: "phy0", STA: "phy0-sta0", CtrlDir: "/var/run/carplayd",
 		Hunt: time.Second, Poll: time.Second, LeaveFor: 3 * time.Second,
-		RAInterval: 3 * time.Second, RouterLife: 60 * time.Second,
+		RAInterval: 3 * time.Second, RouterLife: 20 * time.Second, // 20 s: an abrupt drive-out (no goodbye possible) strands the phone at most this long
 		DNS:       []netip.Addr{netip.MustParseAddr("2001:4860:4860::8888"), netip.MustParseAddr("2606:4700:4700::1111")},
 		WPABinary: "wpa_supplicant",
+		NAT66:     "none", IdleSwitch: time.Minute,
 	}
 }
 
@@ -110,6 +115,9 @@ func parseConfig(r io.Reader) (Config, error) {
 	if err := sc.Err(); err != nil {
 		return cfg, err
 	}
+	if cfg.NAT66 == "ip6tables" && cfg.Uplink == "" {
+		return cfg, fmt.Errorf("nat66 = ip6tables needs uplink = <interface>")
+	}
 	if len(cfg.Cars) == 0 {
 		return cfg, fmt.Errorf("no [car] sections")
 	}
@@ -143,6 +151,17 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 		cfg.CtrlDir = v
 	case "events":
 		cfg.EventsPath = v
+	case "idle_switch":
+		cfg.IdleSwitch, err = time.ParseDuration(v)
+	case "metrics":
+		cfg.Metrics = v
+	case "uplink":
+		cfg.Uplink = v
+	case "nat66":
+		if v != "none" && v != "ip6tables" {
+			return fmt.Errorf("nat66 must be none or ip6tables")
+		}
+		cfg.NAT66 = v
 	case "wpa_supplicant":
 		cfg.WPABinary = v
 	case "hunt":

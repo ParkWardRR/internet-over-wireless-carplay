@@ -182,6 +182,8 @@ EOF
 		# Signal = this radio's rx_rssi + tx power; pin tx power to 0 so
 		# "car X signal N" sets what everyone hears directly. -45 dBm = parked.
 		nsx "$ns" iw dev "$dev" set txpower fixed 0
+		# The real NBT EVO took no address from the box's RA (P2); nor does this one.
+		nsx "$ns" sysctl -qw "net.ipv6.conf.$dev.accept_ra=0"
 		emuagent rssi "$(phy "$(cidx "$id")")" "${CAR_SIGNAL:--45}"
 		nsx "$ns" dnsmasq --conf-file=/dev/null --no-resolv --no-hosts --port=0 --pid-file="$STATE/dnsmasq-$id.pid" \
 			--interface="$dev" --bind-interfaces --dhcp-range=172.16.224.100,172.16.224.200,255.255.255.0,1h \
@@ -217,7 +219,9 @@ phone() {
 	join)
 		mkdir -p "/etc/netns/$ns"
 		echo "nameserver 2001:db8:ffff::53" > "/etc/netns/$ns/resolv.conf"
-		nsx "$ns" sysctl -qw "net.ipv6.conf.$dev.forwarding=0" "net.ipv6.conf.$dev.accept_ra=1" \
+		# iPhones do "DAD with no delay" (SWIFTDAD in Apple's IPConfiguration), so no
+		# DAD wait here either; otherwise the stand-in measures Linux, not the box.
+		nsx "$ns" sysctl -qw "net.ipv6.conf.$dev.accept_dad=0" "net.ipv6.conf.$dev.forwarding=0" "net.ipv6.conf.$dev.accept_ra=1" \
 			"net.ipv6.conf.$dev.accept_ra_defrtr=1" "net.ipv6.conf.$dev.autoconf=1"
 		# Real iPhones learn the channel from the car over Bluetooth, so scan only it.
 		printf 'ctrl_interface=%s\nnetwork={\n ssid="%s"\n psk="%s"\n key_mgmt=WPA-PSK\n scan_freq=%s\n}\n' \

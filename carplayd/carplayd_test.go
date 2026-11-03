@@ -240,3 +240,48 @@ func TestWPAConfig(t *testing.T) {
 		t.Error("want one network per car")
 	}
 }
+
+func TestShouldSwitch(t *testing.T) {
+	t0 := time.Unix(10000, 0)
+	idle := 60 * time.Second
+	// Other car seen before we started serving: never (no ping-pong).
+	if shouldSwitch(t0.Add(5*time.Minute), t0, time.Time{}, idle, t0.Add(-time.Second)) {
+		t.Error("switched to a car that was already there")
+	}
+	// Other car arrives later, served car never had a phone: switch after idle.
+	if shouldSwitch(t0.Add(59*time.Second), t0, time.Time{}, idle, t0.Add(10*time.Second)) {
+		t.Error("switched before idle")
+	}
+	if !shouldSwitch(t0.Add(61*time.Second), t0, time.Time{}, idle, t0.Add(10*time.Second)) {
+		t.Error("did not switch after idle")
+	}
+	// A phone seen recently keeps us on the served car.
+	if shouldSwitch(t0.Add(90*time.Second), t0, t0.Add(80*time.Second), idle, t0.Add(10*time.Second)) {
+		t.Error("abandoned a car whose phone was seen 10 s ago")
+	}
+	if !shouldSwitch(t0.Add(150*time.Second), t0, t0.Add(80*time.Second), idle, t0.Add(10*time.Second)) {
+		t.Error("did not switch 70 s after the phone left")
+	}
+	// Nothing else seen.
+	if shouldSwitch(t0.Add(time.Hour), t0, time.Time{}, idle, time.Time{}) {
+		t.Error("switched to nothing")
+	}
+}
+
+func TestPhonesIn(t *testing.T) {
+	neigh := "fd5c:ba1e:f32:a:0:ff:fe00:300 lladdr 02:00:00:00:03:00 REACHABLE\n" +
+		"fd5c:ba1e:f32:a::99 lladdr 02:00:00:00:03:01 FAILED\n" +
+		"fe80::ff:fe00:100 lladdr 02:00:00:00:01:00 STALE\n" +
+		"fd5c:ba1e:f32:b::7 lladdr 02:00:00:00:04:00 STALE\n" +
+		"fd5c:ba1e:f32:a:1::5 lladdr 02:00:00:00:03:02 STALE\n"
+	if n := phonesIn(neigh, netip.MustParsePrefix("fd5c:ba1e:f32:a::/64")); n != 2 {
+		t.Errorf("phones = %d, want 2", n)
+	}
+}
+
+func TestPhonesInCompressed(t *testing.T) {
+	// fd00:1::5 is NOT in fd00::/64 even though the strings share "fd00:".
+	if n := phonesIn("fd00:1::5 lladdr 02:00:00:00:00:01 REACHABLE\nfd00::7 lladdr 02:00:00:00:00:02 REACHABLE\n", netip.MustParsePrefix("fd00::/64")); n != 1 {
+		t.Errorf("phones = %d, want 1", n)
+	}
+}
