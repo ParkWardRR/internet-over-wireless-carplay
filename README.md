@@ -38,7 +38,11 @@ flowchart LR
   L --> W((Internet))
 ```
 
-## Biggest risk
+## Result (2026-11-02)
+
+**It works.** garage-sbc (Banana Pi) in the car, joined to the CarPlay Wi-Fi, advertising a ULA /64 with RDNSS and NAT66 out of the garage Ethernet. The iPhone (iOS 27.0.1) took the address; **Check For Internet Access → Use For Internet** appeared; Google Maps search and routing worked on CarPlay. No phone IP settings, no change to the car. Details in [docs/test-log.md](docs/test-log.md). Still to test: driving out (P4) and reconnecting after a car restart.
+
+## Biggest risk (before the test)
 
 The car very likely tells the iPhone "no internet here" in every beacon (Apple Device IE flag bit 11, `InternetAccess`, clear), and that's what makes the phone keep cellular. `scripts/car-ie.sh` reads the actual bits in P1. iOS 27 gives a way past that: tapping **Check For Internet Access** makes iOS test the network, and a network that passes gets a **Use For Internet** switch. A non-factory CarPlay receiver (DiPlay) gets it, so iOS evidently goes by the test rather than trusting the car's beacon. The remaining unknowns are narrower:
 
@@ -65,7 +69,7 @@ P2 answers both in an afternoon with a laptop, so nothing gets bought before the
 |---|---|---|
 | **P0** | ✅ CarPlay network page checked (no IP settings, Weak Security, Check For Internet Access button). ✅ PSK via Edit → Known Networks, no jailbreak; Configure IP is there too. ☐ Tap **Check For Internet Access** now (no box) and note what iOS says. ☐ Offline maps in the garage | The free options, and the PSK |
 | **P1** | Mac in the garage, car on: scan the car AP (band, channel, security). Commands in [docs/test-log.md](docs/test-log.md) | Box radio requirements (5 GHz? DFS? TKIP?) |
-| **P2** | **Proof of concept on garage-sbc** (Banana Pi in the car, `scripts/poc-linux.sh`; the Mac script does the same), two ways in one session. (a) **IPv4, proven**: `up`, then set the phone's Configure IP to manual `.5` / router `.254` and try Maps; set it back to Automatic afterwards. (b) **IPv6**: with the phone on Automatic, tap Check For Internet Access. First a passive capture (does the head unit send RAs? what's its address?), then `sudo scripts/poc-mac-nat.sh up`: the Mac joins the car SSID, runs `rtadvd` (ULA /64, 60 s router lifetime, RDNSS) and NAT66 out of USB-C Ethernet. If the iPhone takes the address but stays offline, rerun with `PREFIX6=` a routed public /64. Watch the phone's side with an `rvictl` capture, iOS logs and the **CarNet Probe** app ([docs/iphone-diagnostics.md](docs/iphone-diagnostics.md)) | Second client allowed, iOS takes the IPv6 route, Check For Internet Access passes → Use For Internet, CarPlay survives, Maps works |
+| **P2** ✅ | **Proof of concept on garage-sbc** (Banana Pi in the car, `scripts/poc-linux.sh`; the Mac script does the same), two ways in one session. (a) **IPv4, proven**: `up`, then set the phone's Configure IP to manual `.5` / router `.254` and try Maps; set it back to Automatic afterwards. (b) **IPv6**: with the phone on Automatic, tap Check For Internet Access. First a passive capture (does the head unit send RAs? what's its address?), then `sudo scripts/poc-mac-nat.sh up`: the Mac joins the car SSID, runs `rtadvd` (ULA /64, 60 s router lifetime, RDNSS) and NAT66 out of USB-C Ethernet. If the iPhone takes the address but stays offline, rerun with `PREFIX6=` a routed public /64. Watch the phone's side with an `rvictl` capture, iOS logs and the **CarNet Probe** app ([docs/iphone-diagnostics.md](docs/iphone-diagnostics.md)) | Second client allowed, iOS takes the IPv6 route, Check For Internet Access passes → Use For Internet, CarPlay survives, Maps works |
 | **P3** | Permanent box: GL.iNet GL-MT3000 on vanilla OpenWrt as a Wi-Fi client of the car SSID, odhcpd RA + RDNSS + PREF64, routed /64 from OPNsense, DNS64 + NAT64 | Hands-off: car on → internet |
 | **P4** | Exit test: drive out; the 60 s router lifetime should hand the phone back to cellular within a minute | No dead zone when leaving |
 | **P5** | OBD ENET exploration ([docs/obd-enet.md](docs/obd-enet.md)) | What's reachable from the OBD port |
