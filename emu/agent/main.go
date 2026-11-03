@@ -6,6 +6,8 @@
 //	emuagent ev <event> [detail...]
 //	emuagent wait <condition> [car] [timeout_s]
 //	emuagent rssi <phy> <dBm>        set how strongly every radio hears <phy>
+//	emuagent tcp <name> <[addr]:port>  can this namespace connect there?
+//	emuagent rs <dev>                send one Router Solicitation
 //
 // Conditions: box-assoc, box-disassoc, phone-assoc A|B, phone-disassoc A|B,
 // phone-route A|B, phone-noroute A|B. Each prints "EV <t> <event> ..." when
@@ -14,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -145,6 +148,30 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "rs":
+		// emuagent rs <dev>: send one Router Solicitation to ff02::2 from dev's
+		// link-local (the kernel fills in the checksum), as a host does on link-up.
+		if len(os.Args) != 3 {
+			os.Exit(2)
+		}
+		if err := sendRS(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "rs:", err)
+			os.Exit(1)
+		}
+		ev("rs_sent", os.Args[2])
+	case "tcp":
+		// emuagent tcp <name> <[addr]:port>: can this namespace open a TCP
+		// connection there? Prints "EV <t> reach <name> open|blocked <addr>".
+		if len(os.Args) != 4 {
+			os.Exit(2)
+		}
+		state := "open"
+		if c, err := net.DialTimeout("tcp", os.Args[3], 2*time.Second); err != nil {
+			state = "blocked"
+		} else {
+			c.Close()
+		}
+		ev("reach", os.Args[2], state, os.Args[3])
 	case "wait":
 		if len(os.Args) < 3 {
 			os.Exit(2)
@@ -175,4 +202,33 @@ func main() {
 		fmt.Fprintln(os.Stderr, "unknown command", os.Args[1])
 		os.Exit(2)
 	}
+}
+
+func sendRS(dev string) error {
+	c, err := net.ListenPacket("ip6:ipv6-icmp", "::")
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	ifi, err := net.InterfaceByName(dev)
+	if err != nil {
+		return err
+	}
+	rc, err := c.(*net.IPConn).SyscallConn()
+	if err != nil {
+		return err
+	}
+	var serr error
+	rc.Control(func(fd uintptr) {
+		// ND messages must carry hop limit 255 (RFC 4861 6.1.1).
+		if serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, syscall.IPV6_MULTICAST_HOPS, 255); serr == nil {
+			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, syscall.IPV6_MULTICAST_IF, ifi.Index)
+		}
+	})
+	if serr != nil {
+		return serr
+	}
+	rs := []byte{133, 0, 0, 0, 0, 0, 0, 0} // type, code, checksum, reserved
+	_, err = c.WriteTo(rs, &net.IPAddr{IP: net.ParseIP("ff02::2"), Zone: dev})
+	return err
 }

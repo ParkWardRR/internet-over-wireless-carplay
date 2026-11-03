@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,8 +32,12 @@ type daemon struct {
 	firstSeen    map[string]time.Time
 	huntTick     int
 	phones       int
-	lastRA       time.Time
 	evFile       *os.File
+	up           health        // upstream reachability (route withdrawn while down)
+	healthC      chan upstream // results of background checks
+	checking     bool
+	lastCheck    time.Time
+	blocked      []netip.Prefix // what the firewall currently keeps phones from
 }
 
 // ev prints "EV <boottime> carplayd_<name> ..." (the harness's format) and
@@ -81,6 +86,17 @@ func (d *daemon) setup() error {
 	if err := d.setupNAT(); err != nil {
 		return err
 	}
+	if err := d.applyFirewall(d.homeBlock()); err != nil {
+		return err
+	}
+	d.healthC = make(chan upstream, 1)
+	d.up.ok = true
+	if c.Health {
+		r := checkUpstream(c.HealthTargets, healthTimeout)
+		d.up.ok = r.ok
+		d.ev("upstream", map[bool]string{true: "ok", false: "down"}[r.ok], r.detail)
+	}
+	d.m.set(func(m *metrics) { m.upstream = d.up.ok })
 	if err := os.MkdirAll(c.CtrlDir, 0o700); err != nil {
 		return err
 	}
@@ -92,11 +108,14 @@ const natChain = "CARPLAYD"
 // setupNAT masquerades every car prefix out of the uplink (Debian/SBC; on
 // OpenWrt fw4's masq6 does this and nat66 stays "none").
 func (d *daemon) setupNAT() error {
-	if d.cfg.NAT66 != "ip6tables" {
+	if d.cfg.NAT66 == "none" {
 		return nil
 	}
 	if err := writeSysctl("/proc/sys/net/ipv6/conf/all/forwarding", "1"); err != nil {
 		return err
+	}
+	if d.cfg.NAT66 == "nft" {
+		return nil // in the carplayd nftables table (applyFirewall)
 	}
 	d.teardownNAT()
 	if err := run("ip6tables", "-t", "nat", "-N", natChain); err != nil {
@@ -362,23 +381,22 @@ func (d *daemon) startServing(car *Car) {
 	if err := run("ip", "-6", "addr", "replace", addr, "dev", d.cfg.STA, "nodad"); err != nil {
 		d.ev("error", "addr", err.Error())
 	}
+	d.freshHealth()
+	id := car.ID
 	ra, err := newRASender(d.cfg.STA, raParams{
 		RouterLife: d.cfg.RouterLife, Prefix: car.Prefix,
 		ValidLife: 24 * time.Hour, PreferredLife: 30 * time.Minute,
-		DNS: d.cfg.DNS, DNSLife: 3 * d.cfg.RAInterval,
-	})
+		DNS: d.cfg.DNS, DNSLife: dnsLife(d.cfg),
+	}, d.cfg.RAInterval, func(name string, args ...string) { d.ev(name, append([]string{id}, args...)...) })
 	if err != nil {
 		d.ev("error", "ra", err.Error())
 		return
 	}
 	d.serving, d.ra, d.below = car, ra, time.Time{}
-	d.servingSince, d.lastPhone, d.phones, d.lastRA = time.Now(), time.Time{}, 0, time.Now()
+	d.servingSince, d.lastPhone, d.phones = time.Now(), time.Time{}, 0
 	d.m.set(func(m *metrics) { m.serving, m.phones = car.ID, 0 })
-	go ra.serveRS(func(src net.IP) { d.ev("rs", car.ID, src.String()) })
-	if err := ra.advertise(); err != nil {
-		d.ev("error", "ra_send", err.Error())
-	}
-	d.ev("serving", car.ID, car.Prefix.String())
+	ra.start(!d.up.ok)
+	d.ev("serving", car.ID, car.Prefix.String(), map[bool]string{true: "route", false: "withdrawn"}[d.up.ok])
 }
 
 func (d *daemon) stopServing(goodbye bool) {
@@ -387,9 +405,7 @@ func (d *daemon) stopServing(goodbye bool) {
 	}
 	car := d.serving
 	if goodbye && d.ra != nil {
-		d.ra.goodbye()
-		time.Sleep(100 * time.Millisecond)
-		d.ra.goodbye() // twice: one can be lost on a weak link
+		d.ra.goodbye(d.neighbours())
 		d.ev("goodbye", car.ID)
 		d.m.inc("goodbyes")
 	}
@@ -455,7 +471,7 @@ func (d *daemon) poll() {
 func (d *daemon) loop(stop <-chan os.Signal) {
 	hunt := time.NewTicker(d.cfg.Hunt)
 	pollT := time.NewTicker(d.cfg.Poll)
-	raT := time.NewTicker(d.cfg.RAEager)
+	healthT := time.NewTicker(d.cfg.HealthEvery)
 	d.ev("start", d.cfg.STA, d.freqs())
 	d.hunt()
 	for {
@@ -492,14 +508,15 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 			d.hunt()
 		case <-pollT.C:
 			d.poll()
-		case <-raT.C:
-			// Eager (every ra_eager) until a phone shows up, then every ra_interval:
-			// a phone whose own Router Solicitation got lost (sent before the
-			// WPA handshake finished) still gets the route within ~1 s.
-			if d.ra != nil && (d.phones == 0 || time.Since(d.lastRA) >= d.cfg.RAInterval) {
-				d.ra.advertise()
-				d.lastRA = time.Now()
+		case <-healthT.C:
+			if d.cfg.Health && d.serving != nil && !d.checking {
+				d.checking = true
+				go func() { d.healthC <- checkUpstream(d.cfg.HealthTargets, healthTimeout) }()
 			}
+			d.refreshFirewall()
+		case r := <-d.healthC:
+			d.checking = false
+			d.onHealth(r)
 		}
 	}
 }

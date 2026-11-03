@@ -15,6 +15,7 @@ type metrics struct {
 	serving  string // car ID or ""
 	signal   int
 	phones   int
+	upstream bool
 	counters map[string]int // joins, leaves, goodbyes, link_lost, switches, wpa_restarts
 	detect   float64        // seconds from first scan sighting to connected, last time
 }
@@ -44,6 +45,11 @@ func (m *metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# HELP carplayd_serving 1 while serving a car.\n# TYPE carplayd_serving gauge\ncarplayd_serving{car=%q} %d\n", m.serving, serving)
 	fmt.Fprintf(w, "# TYPE carplayd_signal_dbm gauge\ncarplayd_signal_dbm %d\n", m.signal)
 	fmt.Fprintf(w, "# TYPE carplayd_phones gauge\ncarplayd_phones %d\n", m.phones)
+	up := 0
+	if m.upstream {
+		up = 1
+	}
+	fmt.Fprintf(w, "# HELP carplayd_upstream 1 while the internet is reachable through the uplink.\n# TYPE carplayd_upstream gauge\ncarplayd_upstream %d\n", up)
 	fmt.Fprintf(w, "# TYPE carplayd_detect_seconds gauge\ncarplayd_detect_seconds %.3f\n", m.detect)
 	names := make([]string, 0, len(m.counters))
 	for k := range m.counters {

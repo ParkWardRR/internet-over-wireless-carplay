@@ -38,33 +38,39 @@ func (c Car) Freq() int {
 
 // Config is carplayd's whole configuration.
 type Config struct {
-	Phy        string        // wiphy to put our STA on, e.g. phy0
-	STA        string        // name of the STA netdev we create
-	CtrlDir    string        // wpa_supplicant control directory for our instance
-	Hunt       time.Duration // scan period while not serving
-	Poll       time.Duration // signal poll period while serving
-	LeaveFor   time.Duration // how long below Leave before leaving
-	RAInterval time.Duration // unsolicited RA period once a phone is on the car
-	RAEager    time.Duration // unsolicited RA period while no phone is on the car yet
-	RouterLife time.Duration // RA router lifetime
-	DNS        []netip.Addr  // RDNSS servers
-	EventsPath string        // EV lines are appended here too
-	WPABinary  string
-	Uplink     string        // interface toward the internet (for nat66)
-	NAT66      string        // "none" (fw4 or someone else does it) or "ip6tables"
-	IdleSwitch time.Duration // serve another car once the served one has had no phone this long
-	Metrics    string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
-	Cars       []Car
+	Phy           string        // wiphy to put our STA on, e.g. phy0
+	STA           string        // name of the STA netdev we create
+	CtrlDir       string        // wpa_supplicant control directory for our instance
+	Hunt          time.Duration // scan period while not serving
+	Poll          time.Duration // signal poll period while serving
+	LeaveFor      time.Duration // how long below Leave before leaving
+	RAInterval    time.Duration // MaxRtrAdvInterval: periodic RAs every random [0.75, 1] × this (RFC 4861)
+	RouterLife    time.Duration // RA router lifetime
+	DNS           []netip.Addr  // RDNSS servers
+	EventsPath    string        // EV lines are appended here too
+	WPABinary     string
+	Uplink        string         // interface toward the internet (for nat66)
+	NAT66         string         // "none" (fw4 or someone else does it), "ip6tables" or "nft"
+	Firewall      string         // "nft": isolate the car networks (carplayd table); "none"
+	Block         []netip.Prefix // extra destinations phones must not reach (home LAN beyond the uplink)
+	Health        bool           // withdraw the route while the upstream is unreachable
+	HealthEvery   time.Duration
+	HealthFail    int           // consecutive failed checks before withdrawing
+	HealthTargets []string      // host:port to TCP-connect; default: each DNS server, port 53
+	IdleSwitch    time.Duration // serve another car once the served one has had no phone this long
+	Metrics       string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
+	Cars          []Car
 }
 
 func defaultConfig() Config {
 	return Config{
 		Phy: "phy0", STA: "phy0-sta0", CtrlDir: "/var/run/carplayd",
 		Hunt: time.Second, Poll: time.Second, LeaveFor: 3 * time.Second,
-		RAInterval: 3 * time.Second, RAEager: time.Second, RouterLife: 20 * time.Second, // 20 s: an abrupt drive-out (no goodbye possible) strands the phone at most this long
+		RAInterval: 4 * time.Second, RouterLife: 20 * time.Second, // 20 s: an abrupt drive-out (no goodbye possible) strands the phone at most this long
 		DNS:       []netip.Addr{netip.MustParseAddr("2001:4860:4860::8888"), netip.MustParseAddr("2606:4700:4700::1111")},
 		WPABinary: "wpa_supplicant",
 		NAT66:     "none", IdleSwitch: time.Minute,
+		Firewall: "nft", Health: true, HealthEvery: 3 * time.Second, HealthFail: 2,
 	}
 }
 
@@ -120,8 +126,19 @@ func parseConfig(r io.Reader) (Config, error) {
 	if err := sc.Err(); err != nil {
 		return cfg, err
 	}
-	if cfg.NAT66 == "ip6tables" && cfg.Uplink == "" {
-		return cfg, fmt.Errorf("nat66 = ip6tables needs uplink = <interface>")
+	if cfg.NAT66 != "none" && cfg.Uplink == "" {
+		return cfg, fmt.Errorf("nat66 = %s needs uplink = <interface>", cfg.NAT66)
+	}
+	if cfg.RAInterval < minAllowedMaxRtrAdv || cfg.RAInterval > 1800*time.Second {
+		return cfg, fmt.Errorf("ra_interval (MaxRtrAdvInterval) must be 4s..1800s (RFC 4861)")
+	}
+	if cfg.RouterLife != 0 && (cfg.RouterLife < cfg.RAInterval || cfg.RouterLife > 9000*time.Second) {
+		return cfg, fmt.Errorf("router_lifetime must be 0 or ra_interval..9000s (RFC 4861)")
+	}
+	if len(cfg.HealthTargets) == 0 {
+		for _, d := range cfg.DNS {
+			cfg.HealthTargets = append(cfg.HealthTargets, netip.AddrPortFrom(d, 53).String())
+		}
 	}
 	if len(cfg.Cars) == 0 {
 		return cfg, fmt.Errorf("no [car] sections")
@@ -163,10 +180,39 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 	case "uplink":
 		cfg.Uplink = v
 	case "nat66":
-		if v != "none" && v != "ip6tables" {
-			return fmt.Errorf("nat66 must be none or ip6tables")
+		if v != "none" && v != "ip6tables" && v != "nft" {
+			return fmt.Errorf("nat66 must be none, ip6tables or nft")
 		}
 		cfg.NAT66 = v
+	case "firewall":
+		if v != "none" && v != "nft" {
+			return fmt.Errorf("firewall must be nft or none")
+		}
+		cfg.Firewall = v
+	case "block":
+		for _, s := range splitList(v) {
+			p, perr := netip.ParsePrefix(s)
+			if perr != nil || !p.Addr().Is6() {
+				return fmt.Errorf("block %q: not an IPv6 prefix", s)
+			}
+			cfg.Block = append(cfg.Block, p.Masked())
+		}
+	case "health":
+		if v != "on" && v != "off" {
+			return fmt.Errorf("health must be on or off")
+		}
+		cfg.Health = v == "on"
+	case "health_interval":
+		cfg.HealthEvery, err = time.ParseDuration(v)
+	case "health_fail":
+		cfg.HealthFail, err = strconv.Atoi(v)
+	case "health_target":
+		for _, s := range splitList(v) {
+			if _, perr := netip.ParseAddrPort(s); perr != nil {
+				return fmt.Errorf("health_target %q: want [addr]:port", s)
+			}
+			cfg.HealthTargets = append(cfg.HealthTargets, s)
+		}
 	case "wpa_supplicant":
 		cfg.WPABinary = v
 	case "hunt":
@@ -176,7 +222,7 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 	case "leave_for":
 		cfg.LeaveFor, err = time.ParseDuration(v)
 	case "ra_eager":
-		cfg.RAEager, err = time.ParseDuration(v)
+		return fmt.Errorf("ra_eager was removed: RAs follow RFC 4861 timing (ra_interval)")
 	case "ra_interval":
 		cfg.RAInterval, err = time.ParseDuration(v)
 	case "router_lifetime":
@@ -185,7 +231,7 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 		if !*dnsSet {
 			cfg.DNS, *dnsSet = nil, true
 		}
-		for _, s := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' }) {
+		for _, s := range splitList(v) {
 			a, perr := netip.ParseAddr(s)
 			if perr != nil || !a.Is6() {
 				return fmt.Errorf("dns %q: not an IPv6 address", s)
@@ -233,4 +279,8 @@ func setCar(c *Car, k, v string) error {
 		return fmt.Errorf("unknown car key %q", k)
 	}
 	return err
+}
+
+func splitList(v string) []string {
+	return strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' })
 }

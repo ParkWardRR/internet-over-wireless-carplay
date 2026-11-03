@@ -157,6 +157,10 @@ var scenarios = []scenario{
 	{"wpa-kill", "carplayd's wpa_supplicant is killed while serving: restart and serve again", "carplayd", wpaKill},
 	{"restart", "carplayd itself is killed and restarted (procd/systemd): serve again, same prefix", "carplayd", restart},
 	{"soak", "car A off/on 20 times: every cycle served", "carplayd", soak},
+	{"upstream-loss", "the internet behind the box dies while serving: withdraw the route, stay on the car, resume", "carplayd", upstreamLoss},
+	{"isolation", "phone on the car Wi-Fi: internet reachable; box, home LAN, other car not", "carplayd", isolation},
+	{"isolation-control", "same with the firewall off: the probe must see leaks", "carplayd", isolationControl},
+	{"ra-audit", "capture on the box: RFC 4861 RA timing, unicast RS answers, complete withdrawals", "carplayd", raAudit},
 }
 
 func up(s *session, cars ...string) error {
@@ -372,13 +376,20 @@ func bothOn(s *session) (map[string]float64, error) {
 
 // targets from docs/fast-connect-plan.md (seconds); metrics without one are informational.
 var targets = map[string]float64{
-	"car_on→box_assoc":           1.5,
-	"carB_on→box_assoc":          1.5,
-	"box_assoc→phone_route":      4,
-	"out_of_range→phone_noroute": 21, // abrupt loss: no goodbye can reach the phone; bounded by the 20 s router lifetime
-	"below_leave→phone_noroute":  5,  // leave_for (3 s) + goodbye
-	"back_in_range→box_assoc":    1.5,
-	"above_rejoin→box_assoc":     2.5,
+	"car_on→box_assoc":            1.5,
+	"carB_on→box_assoc":           1.5,
+	"box_assoc→phone_route":       4,
+	"out_of_range→phone_noroute":  21, // abrupt loss: no goodbye can reach the phone; bounded by the 20 s router lifetime
+	"below_leave→phone_noroute":   5,  // leave_for (3 s) + goodbye
+	"back_in_range→box_assoc":     1.5,
+	"above_rejoin→box_assoc":      2.5,
+	"upstream_down→phone_noroute": 10, // health every 3 s, 2 failures, 2 s connect timeout
+	"upstream_up→phone_route":     4,
+	"leaks":                       0,
+	"mcast_spacing_violations":    0,
+	"incomplete_withdrawals":      0,
+	"rs_unanswered":               0,
+	"rs_answer_max_s":             0.6,
 }
 
 func target(metric string) (float64, bool) {
@@ -447,7 +458,9 @@ func main() {
 			}
 			s.pull()
 			if s.box == "carplayd" {
-				s.sh("tail -5 /tmp/emu/carplayd.log")
+				// log only: its EV lines were already pulled from carplayd.events
+				out, _ := exec.Command(filepath.Join(s.repo, "emu/run.sh"), "ssh", "tail -5 /tmp/emu/carplayd.log").CombinedOutput()
+				fmt.Fprintf(s.log, "$ tail -5 carplayd.log\n%s", out)
 			}
 			r.Events = s.events
 			runs = append(runs, r)

@@ -89,26 +89,83 @@ func shouldSwitch(now, servingSince, lastPhone time.Time, idle time.Duration, ot
 	return now.Sub(quietSince) >= idle
 }
 
-// phonesIn counts neighbours with an address in prefix that look alive, from
-// `ip -6 neigh show dev X` output. Only phones autoconfigure in our prefix (the
-// head unit didn't on the real car), so this is the phone count.
-func phonesIn(neigh string, prefix netip.Prefix) int {
-	n := 0
-	for _, l := range strings.Split(neigh, "\n") {
+// neighbour is one line of `ip -6 neigh show dev X`.
+type neighbour struct {
+	addr  netip.Addr
+	mac   string
+	state string
+}
+
+func parseNeigh(out string) []neighbour {
+	var ns []neighbour
+	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
-		if len(f) == 0 {
+		if len(f) < 2 {
 			continue
 		}
 		a, err := netip.ParseAddr(f[0])
-		if err != nil || !prefix.Contains(a) {
+		if err != nil {
 			continue
 		}
-		switch f[len(f)-1] {
-		case "REACHABLE", "STALE", "DELAY", "PROBE":
-			n++
+		n := neighbour{addr: a, state: f[len(f)-1]}
+		for i := 1; i+1 < len(f); i++ {
+			if f[i] == "lladdr" {
+				n.mac = strings.ToLower(f[i+1])
+			}
+		}
+		ns = append(ns, n)
+	}
+	return ns
+}
+
+func (n neighbour) alive() bool {
+	switch n.state {
+	case "REACHABLE", "STALE", "DELAY", "PROBE":
+		return true
+	}
+	return false
+}
+
+// phonesIn counts the devices (unique link-layer addresses) with a live
+// neighbour entry in prefix. One iPhone holds several addresses at once
+// (stable + temporary), so counting addresses would overcount. Only phones
+// autoconfigure in our prefix (the head unit didn't on the real car).
+func phonesIn(neigh string, prefix netip.Prefix) int {
+	macs := map[string]bool{}
+	for _, n := range parseNeigh(neigh) {
+		if n.alive() && n.mac != "" && prefix.Contains(n.addr) {
+			macs[n.mac] = true
 		}
 	}
-	return n
+	return len(macs)
+}
+
+// withdrawTargets picks one address per device on the link for a unicast
+// withdrawal RA: its link-local if we know it (a host acts on an RA to any of
+// its addresses), else an address in prefix.
+func withdrawTargets(neigh string, prefix netip.Prefix) []netip.Addr {
+	best := map[string]netip.Addr{}
+	var order []string
+	for _, n := range parseNeigh(neigh) {
+		if n.mac == "" || n.state == "FAILED" || n.state == "INCOMPLETE" {
+			continue
+		}
+		if !n.addr.IsLinkLocalUnicast() && !prefix.Contains(n.addr) {
+			continue
+		}
+		cur, ok := best[n.mac]
+		if !ok {
+			order = append(order, n.mac)
+		}
+		if !ok || (n.addr.IsLinkLocalUnicast() && !cur.IsLinkLocalUnicast()) {
+			best[n.mac] = n.addr
+		}
+	}
+	out := make([]netip.Addr, 0, len(order))
+	for _, m := range order {
+		out = append(out, best[m])
+	}
+	return out
 }
 
 // preempt lets a higher-priority car take over right after we started serving
