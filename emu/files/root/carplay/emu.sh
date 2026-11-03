@@ -151,6 +151,17 @@ EOF
 	ev box_carplayd "$@"
 }
 
+# Robustness: kill carplayd (as a crash would) and start it again, as procd
+# would; or kill only its wpa_supplicant.
+carplayd_restart() {
+	killall -9 carplayd 2>/dev/null; ev carplayd_killed
+	(carplayd -c /etc/carplayd.conf >>"$STATE/carplayd.log" 2>&1 </dev/null &)
+	ev carplayd_started
+}
+wpa_kill() {
+	kill -9 "$(cat /var/run/carplayd/wpa.pid)" 2>/dev/null; ev wpa_killed
+}
+
 car() {
 	id=$1 action=$2 ns=car$1 dev=car-$(lc "$1")0
 	case $action in
@@ -221,6 +232,9 @@ phone() {
 		echo "nameserver 2001:db8:ffff::53" > "/etc/netns/$ns/resolv.conf"
 		# iPhones do "DAD with no delay" (SWIFTDAD in Apple's IPConfiguration), so no
 		# DAD wait here either; otherwise the stand-in measures Linux, not the box.
+		# Linux only drops expired RA routes on its 30 s route GC; iOS drops them when
+		# the lifetime runs out. GC every second so drive-out timings are the box's.
+		nsx "$ns" sysctl -qw net.ipv6.route.gc_interval=1
 		nsx "$ns" sysctl -qw "net.ipv6.conf.$dev.accept_dad=0" "net.ipv6.conf.$dev.forwarding=0" "net.ipv6.conf.$dev.accept_ra=1" \
 			"net.ipv6.conf.$dev.accept_ra_defrtr=1" "net.ipv6.conf.$dev.autoconf=1"
 		# Real iPhones learn the channel from the car over Bluetooth, so scan only it.
@@ -246,6 +260,8 @@ case ${1:-} in
 	setup) setup ;;
 	box-apply) box_apply "$2" ;;
 	box-carplayd) shift; box_carplayd "$@" ;;
+	carplayd-restart) carplayd_restart ;;
+	wpa-kill) wpa_kill ;;
 	car) car "$2" "$3" "${4:-}" ;;
 	phone) phone "$2" "$3" ;;
 	# Timing-critical polling (20 ms, ms timestamps) is done by the Go agent.

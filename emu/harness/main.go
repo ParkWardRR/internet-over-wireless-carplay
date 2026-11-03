@@ -153,6 +153,10 @@ var scenarios = []scenario{
 	{"fade-return", "after a fade-out, the signal comes back 3 dB/s: rejoin with hysteresis", "carplayd", fadeReturn},
 	{"two-cars", "car A served, drives out; car B starts: B served with its own prefix", "carplayd", twoCars},
 	{"both-on", "both cars start together: priority picks A", "carplayd", bothOn},
+	{"flap", "signal hovers around the leave threshold for 30 s: at most one leave, no rejoin below rejoin", "carplayd", flap},
+	{"wpa-kill", "carplayd's wpa_supplicant is killed while serving: restart and serve again", "carplayd", wpaKill},
+	{"restart", "carplayd itself is killed and restarted (procd/systemd): serve again, same prefix", "carplayd", restart},
+	{"soak", "car A off/on 20 times: every cycle served", "carplayd", soak},
 }
 
 func up(s *session, cars ...string) error {
@@ -524,7 +528,13 @@ func report(box string, runs []run) string {
 
 // after records metric = first `to` event after the last `from` event for car.
 func (s *session) after(m map[string]float64, metric, from, car, to string) {
-	a, ok := s.last(from, car)
+	var a event
+	var ok bool
+	if car == "" {
+		a, ok = s.last(from)
+	} else {
+		a, ok = s.last(from, car)
+	}
 	if !ok {
 		return
 	}
@@ -536,3 +546,85 @@ func (s *session) after(m map[string]float64, metric, from, car, to string) {
 // jitter waits a random 0-1 s so car starts don't line up with the box's
 // scan cycle (the harness is otherwise too regular).
 func jitter() { time.Sleep(time.Duration(rand.Int63n(int64(time.Second)))) }
+
+func count(s *session, name string) int {
+	n := 0
+	for _, e := range s.events {
+		if e.Name == name {
+			n++
+		}
+	}
+	return n
+}
+
+func flap(s *session) (map[string]float64, error) {
+	m := map[string]float64{}
+	if err := up(s); err != nil {
+		return m, err
+	}
+	// Alternate just above and just below the leave threshold (-84) for 30 s.
+	var vals []string
+	for i := 0; i < 15; i++ {
+		vals = append(vals, "-82", "-86")
+	}
+	err := s.must(fmt.Sprintf("for v in %s; do %s car A signal $v; sleep 1; done", strings.Join(vals, " "), E))
+	s.pull()
+	m["leaves"] = float64(count(s, "carplayd_leave"))
+	m["joins_after_first"] = float64(count(s, "carplayd_connected") - 1)
+	// -82 is above leave (-84) but below rejoin (-76): once left, it must stay left.
+	if m["joins_after_first"] > 0 {
+		return m, fmt.Errorf("rejoined %v times while the signal never reached the rejoin threshold", m["joins_after_first"])
+	}
+	return m, err
+}
+
+func wpaKill(s *session) (map[string]float64, error) {
+	m := map[string]float64{}
+	if err := up(s); err != nil {
+		return m, err
+	}
+	if err := s.must(E + " wpa-kill && " + E + " wait box-disassoc 30 && " + E + " wait box-assoc 60"); err != nil {
+		return m, err
+	}
+	s.after(m, "wpa_killed→box_assoc", "wpa_killed", "", "box_assoc")
+	s.pull()
+	m["wpa_restarts"] = float64(count(s, "carplayd_wpa_restart"))
+	if m["wpa_restarts"] < 1 {
+		return m, fmt.Errorf("carplayd did not report restarting wpa_supplicant")
+	}
+	return m, s.must(E + " wait phone-route A 30")
+}
+
+func restart(s *session) (map[string]float64, error) {
+	m := map[string]float64{}
+	if err := up(s); err != nil {
+		return m, err
+	}
+	if err := s.must(E + " carplayd-restart && " + E + " wait box-assoc 60"); err != nil {
+		return m, err
+	}
+	s.after(m, "carplayd_started→box_assoc", "carplayd_started", "", "box_assoc")
+	s.pull()
+	if c, ok := s.last("carplayd_serving"); !ok || len(c.Args) < 2 || c.Args[1] != "fd5c:ba1e:f32:a::/64" {
+		return m, fmt.Errorf("not serving car A's prefix after restart: %+v", c)
+	}
+	return m, s.must(E + " wait phone-route A 30")
+}
+
+func soak(s *session) (map[string]float64, error) {
+	m := map[string]float64{}
+	if err := s.must(s.boxCmd("A") + " && sleep 2"); err != nil {
+		return m, err
+	}
+	for i := 1; i <= 20; i++ {
+		jitter()
+		if err := s.must(E + " car A on && " + E + " wait box-assoc 30"); err != nil {
+			return m, fmt.Errorf("cycle %d: %v", i, err)
+		}
+		s.between(m, fmt.Sprintf("car_on→box_assoc#%d", i), "car_on", "box_assoc")
+		if err := s.must(E + " car A off && " + E + " wait box-disassoc 30 && sleep 2"); err != nil {
+			return m, fmt.Errorf("cycle %d: %v", i, err)
+		}
+	}
+	return m, nil
+}
