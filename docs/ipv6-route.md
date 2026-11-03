@@ -48,6 +48,8 @@ The car's AP moves with the car, so the **box** loses the association and the **
 
 ## Permanent box (P3)
 
+Build steps and the ready-made config: [openwrt-box.md](openwrt-box.md), `scripts/openwrt-carplay.sh`. Interim: `scripts/carplay-box.sh` on garage-sbc.
+
 Two options. **(a) A Linux SBC as in P2** (garage-sbc: NetworkManager + radvd + iptables, `scripts/poc-linux.sh`), made automatic: NM autoconnect for the car network, radvd and NAT started by a NetworkManager dispatcher hook on `wlan0` up, stopped (goodbye RA) on down. **(b) An OpenWrt travel router**, `wwan` = client of `BMW<5 digits> CarPlay` (WPA/TKIP allowed), `wan` = garage Ethernet:
 
 | Piece | OpenWrt |

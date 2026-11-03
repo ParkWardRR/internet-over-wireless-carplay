@@ -54,7 +54,7 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 | **P0** | iPhone checks: CarPlay page, PSK, Configure IP | ✅ PSK and Configure IP via Edit → Known Networks |
 | **P1** | Read the car AP: band, security, beacon flags (`poc-linux.sh ie`) | ✅ 2.4 GHz ch 11, WPA/WPA2 TKIP, Interworking Internet = 0 |
 | **P2** | Proof of concept: garage-sbc in the car, `poc-linux.sh up`; Check For Internet Access → Use For Internet; Maps | ✅ works; traffic, latency and goodbye RA checked |
-| **P3** | Permanent box: auto-join when the car Wi-Fi appears, radvd + NAT with it, survives reboots. garage-sbc as is, or OpenWrt ([ipv6-route.md](docs/ipv6-route.md#permanent-box-p3)) | next |
+| **P3** | Permanent box. **Interim: garage-sbc in the garage, automatic** (`scripts/carplay-box.sh`: NM auto-joins the car Wi-Fi, a dispatcher hook starts radvd + NAT). **Final: an OpenWrt router** ([docs/openwrt-box.md](docs/openwrt-box.md), `scripts/openwrt-carplay.sh`) | interim installed 2026-11-03; OpenWrt to do |
 | **P4** | Exit test: drive out, time the return to cellular (60 s router lifetime) | to do |
 | **P4b** | Restart test: does iOS remember *Use For Internet* across car restarts? | to do |
 | **P5** | OBD ENET exploration | optional |
@@ -82,6 +82,8 @@ Sniffing it is out (10 random characters) and so is Bluetooth (encrypted).
 | [docs/ipv4-options.md](docs/ipv4-options.md) | IPv4 alternatives |
 | [docs/obd-enet.md](docs/obd-enet.md) | OBD ENET recon |
 | `scripts/poc-linux.sh` | The working setup on a Linux box (`ie`, `up`, `capture`, `status`, `down`) |
+| `scripts/carplay-box.sh` | garage-sbc hands-off mode (`install`, `status`, `uninstall`) |
+| `scripts/openwrt-carplay.sh`, [docs/openwrt-box.md](docs/openwrt-box.md) | The OpenWrt replacement |
 | `scripts/poc-mac-nat.sh` | Same on a Mac (rtadvd + pf) |
 | `scripts/car-ie.sh`, `scripts/car-ie.swift` | Beacon decoder for the Mac |
 | `ios/CarNetProbe`, `scripts/install-probe.sh` | iPhone diagnostics app |
