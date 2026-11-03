@@ -6,7 +6,7 @@ Give the iPhone internet while it's on **wireless CarPlay** in the basement gara
 
 A small Linux box in the car (garage-sbc, a Banana Pi, wired to the garage LAN) joins the car's CarPlay Wi-Fi as a second client and advertises an **IPv6 route + DNS** with NAT66 to the home connection. On the iPhone (iOS 27): Settings → Wi-Fi → the CarPlay network → **Check For Internet Access** → **Use For Internet**. Google Maps search and routing then work on CarPlay underground. Nothing on the car changes, and no IP settings change on the phone.
 
-**Status, plan and open items: [docs/status.md](docs/status.md).** **Full write-up: [docs/findings.md](docs/findings.md).** Raw results: [docs/test-log.md](docs/test-log.md). Run it: `scripts/poc-linux.sh` (see *P2 on garage-sbc* in the test log).
+**Status, plan and open items: [docs/status.md](docs/status.md).** External review and our response: [docs/review-response.md](docs/review-response.md). **Full write-up: [docs/findings.md](docs/findings.md).** Raw results: [docs/test-log.md](docs/test-log.md). Run it: `scripts/poc-linux.sh` (see *P2 on garage-sbc* in the test log).
 
 ```mermaid
 flowchart LR
@@ -25,13 +25,13 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 
 | Fact | Source | Checked |
 |---|---|---|
-| **The car's CarPlay Wi-Fi**: 2.4 GHz only (channel 11, HT20, one stream), WPA/WPA2 mixed with a TKIP group cipher (iOS calls it "Weak Security"). The beacon's **802.11u Interworking element has the Internet bit clear** (Private, venue Vehicular). No Apple Device IE | `iw` scan from the box | ✅ 2026-11-02 |
+| **The F32's CarPlay Wi-Fi** (observed): 2.4 GHz (channel 11, HT20, one stream), WPA/WPA2 mixed with a TKIP group cipher (iOS calls it "Weak Security"). The beacon's **802.11u Interworking element has the Internet bit clear** (Private, venue Vehicular). No Apple Device IE | `iw` scan from the box | ✅ 2026-11-02 |
 | DHCP gives 172.16.224.0/24 with **no router and no DNS**. Head unit = AP at `172.16.224.1`, sends **no IPv6 RAs**. A second client is allowed (box got `.127`, iPhone `.110`). The car's LTE hotspot (if fitted) is a separate 172.16.222.x network | box; [gearshifters](https://gearshifters.org/bmw/how-to-find-bmw-carplay-password/) copy of the Bimmerfest post; [Apple forum 76449](https://developer.apple.com/forums/thread/76449) | ✅ |
 | SSID digits = last 5 of the VIN. PSK = 10 random alphanumerics, sent to the phone over Bluetooth. **iOS 27 shows it, no jailbreak**: Settings → Wi-Fi → Edit → Known Networks → the CarPlay network → Password | the iPhone | ✅ 2026-11-02 |
 | **iOS 27**: the CarPlay network page hides IP settings and shows a **Check For Internet Access** button. If the network passes, a **Use For Internet** switch appears ("your iPhone will also use your vehicle's hotspot to access the internet. If the hotspot loses connectivity, the iPhone will use its cellular connection"). The Known Networks page still has **Configure IP** | the iPhone; [betaprofiles iOS 27 beta notes](https://forum.betaprofiles.com/t/whats-new-in-ios-27-beta-3/23195?page=2); [DiPlay #393](https://github.com/shihabal3amri/DiPlay/issues/393) | ✅ |
-| **Prior art on this head unit (Feb 2022)**: ksweber put a Teltonika RUT850 LTE router on the CarPlay Wi-Fi at `.254` and set the iPhone to manual `.5`, gateway + DNS `.254`: "Finally the iPhone providing Carplay with the NBT head unit was able to fetch internet". Nobody else found doing it; the IPv6 / iOS 27 route appears new | [Bimmerfest thread](https://www.bimmerfest.com/threads/nbt-evo-carplay-wifi-password.1376809/) (read via `r.jina.ai`); ~30 searches in 4 languages | ✅ |
+| **Prior art on this head unit (Feb 2022)**: ksweber put a Teltonika RUT850 LTE router on the CarPlay Wi-Fi at `.254` and set the iPhone to manual `.5`, gateway + DNS `.254`: "Finally the iPhone providing Carplay with the NBT head unit was able to fetch internet". We found no other public implementation, and no prior description of the IPv6 / iOS 27 route | [Bimmerfest thread](https://www.bimmerfest.com/threads/nbt-evo-carplay-wifi-password.1376809/) (read via `r.jina.ai`); ~30 searches in 4 languages | ✅ |
 | Two kinds of wireless CarPlay car. **Wi-Fi pairing**: CarPlay over the car's normal hotspot, so the phone uses hotspot data. **Bluetooth pairing**: a private CarPlay-only network with no internet. BMW's NBT EVO is the second kind | Audi TSBs [2021](https://static.nhtsa.gov/odi/tsbs/2021/MC-10189148-0001.pdf), [2024](https://static.nhtsa.gov/odi/tsbs/2024/MC-10250567-0001.pdf) | ✅ |
-| Why a CarPlay network normally carries no internet: configd gives a service ranked `Never` only a scoped default route (wired CarPlay is `Never`); *Use For Internet* lifts it. Darwin asks for AAAA on a ULA-only network, so no public prefix is needed | Apple's open-source configd, Libinfo, xnu ([iphone-diagnostics.md](docs/iphone-diagnostics.md#reading-the-probes)) | ✅ |
+| Why a CarPlay network normally carries no internet: configd gives a service ranked `Never` only a scoped default route (wired CarPlay is `Never`); *Use For Internet* presumably lifts it (hypothesis, not traced on the device). Darwin asks for AAAA on a ULA-only network, so no public prefix is needed | Apple's open-source configd, Libinfo, xnu ([iphone-diagnostics.md](docs/iphone-diagnostics.md#reading-the-probes)) | ✅ |
 | Home LAN is 172.16.0.0/16, which overlaps the car's 172.16.224.0/24. Harmless: nothing at home uses .224.x, the box NATs, and the scripts refuse to start unless they really got a car address | Kea config | |
 | Home has native IPv6 (Spectrum); Google Maps answers over IPv6. A few hosts are IPv4-only (`gsp1.apple.com`, push, Mapbox): DNS64 + NAT64 would cover them | AAAA lookups ([ipv6-route.md](docs/ipv6-route.md)) | ✅ |
 
@@ -39,7 +39,7 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 
 | # | Approach | Cost | Touches car | Status |
 |---|---|---|---|---|
-| **1** | **Box in the car on the CarPlay Wi-Fi, IPv6 RA + RDNSS, NAT66 to garage Ethernet.** No phone settings; the route expires 60 s after the car leaves | a Linux SBC or ~$70–90 travel router | no | ✅ **works** (P2) |
+| **1** | **Box in the car on the CarPlay Wi-Fi, IPv6 RA + RDNSS, NAT66 to garage Ethernet.** No phone settings; the route goes with a withdrawal RA, or expires 20 s after an abrupt loss | a Linux SBC or ~$70–90 travel router | no | ✅ **works** (P2) |
 | 0b | Manual IPv4: box at `.254` with NAT44, phone Configure IP → Manual `.5` / router `.254`. `poc-linux.sh` already holds `.254` | same box | no | proven by ksweber (2022); not needed, and the static router setting outlives the garage |
 | 1b | USB-C Ethernet on the phone, cabled to a travel router on the garage Wi-Fi | ~$50 | no | untested backup; needs no PSK |
 | 0 | Offline maps: Apple Maps with *Only Use Offline Maps* ([105084](https://support.apple.com/en-us/105084)); Google Maps offline areas ([6291838](https://support.google.com/maps/answer/6291838?hl=en&co=GENIE.Platform%3DiOS)) | $0 | no | works for known places, no live traffic |
@@ -84,6 +84,7 @@ Sniffing it is out (10 random characters) and so is Bluetooth (encrypted).
 | `carplayd/` | The Go controller (deployed on garage-sbc) |
 | `emu/` | Emulator: OpenWrt image build, `emu.sh`, Go agent + harness |
 | [docs/test-log.md](docs/test-log.md) | Every test, dated |
+| [docs/review-response.md](docs/review-response.md) | External review of status.md: findings, changes, evidence |
 | [docs/ipv6-route.md](docs/ipv6-route.md) | IPv6 design, reachability, permanent-box recipe |
 | [docs/iphone-diagnostics.md](docs/iphone-diagnostics.md) | rvictl capture, iOS logs, CarNet Probe |
 | [docs/ipv4-options.md](docs/ipv4-options.md) | IPv4 alternatives |

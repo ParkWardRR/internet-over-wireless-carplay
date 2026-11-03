@@ -54,7 +54,7 @@ The DHCP-lease guard only existed because home is 172.16/16 too. With no IPv4 on
 | Hunter | targeted scans for all configured cars every 1 s while any STA is free (`SCAN freq=<chans> ssid=<…>`), ~150 ms per scan | wpa_supplicant control socket (Debian, simulator); `ubus call wpa_supplicant.<if> control` (OpenWrt) |
 | Joiner | `SELECT_NETWORK` the chosen car; clears bans with `ENABLE_NETWORK` | same |
 | Signal | `SIGNAL_POLL` every 1 s while serving (works on ath11k and brcmfmac; OpenWrt has no bgscan) | same |
-| RA engine | sends RAs **itself** per car link: immediately on CONNECTED, then every 3–4 s, answers RS at once (unicast), RDNSS, router lifetime 20–60 s, **goodbye (lifetime 0) per car**. Replaces radvd/odhcpd, whose start-up traps cost seconds (odhcpd: fixed 1 s first-RA timer, waits for non-tentative link-local; radvd: a failed setup retries after 10 × MaxRtrAdvInterval) | raw ICMPv6 ([mdlayher/ndp](https://github.com/mdlayher/ndp)) |
+| RA engine | sends RAs **itself** per car link through one RFC 4861 scheduler: first multicast on CONNECTED, then every random 3–4 s, never two multicasts within 3 s; RS (and a new device's MLD report) answered by unicast after 0–0.5 s; RDNSS; router lifetime 20 s; **withdrawal per car** (router, RDNSS and preferred lifetime 0) on goodbye or upstream loss. Replaces radvd/odhcpd, whose start-up traps cost seconds (odhcpd: fixed 1 s first-RA timer, waits for non-tentative link-local; radvd: a failed setup retries after 10 × MaxRtrAdvInterval) | raw ICMPv6 ([mdlayher/ndp](https://github.com/mdlayher/ndp)) |
 | Addresses | per-car ULA `::1/64` on the STA, `accept_dad=0`, power save off | netlink |
 | NAT66 | per prefix out of the uplink | nftables (Debian/sim); fw4 zone + `masq6` (OpenWrt, static config) |
 | Phone detection | SLAAC neighbours in the car prefix, NAT flows from it | netlink neigh, conntrack |
@@ -89,7 +89,7 @@ Watching for Y while serving X: if Y is on X's channel, a scan of the current ch
 
 - The **EWS377** (mounted in the garage, better RF for the far F22 spot) hunts both cars and serves the first one seen.
 - **garage-sbc** serves only a car the EWS isn't serving: when both cars are on (S5), or when the EWS is down. Its peer heartbeat tells it which.
-- **Exactly one router per car network**, so the phone never sees two RAs and two prefixes.
+- **One router per car network** is the goal, so the phone doesn't see two RAs and two prefixes. A heartbeat can't guarantee it through a network partition, so production uses **fixed ownership** (one box per car, the standby takes over only after a bounded silence). If both advertise anyway, IPv6 copes with two default routers: degraded, not broken ([status.md](status.md#the-plan-reordered-after-the-review)).
 - If the heartbeat is lost for 5 s, garage-sbc assumes the EWS is gone and serves the nearest car.
 - Same prefix per car on both boxes, so a hand-over doesn't renumber the phone.
 

@@ -30,8 +30,8 @@ flowchart LR
 
 | | Value | How we know |
 |---|---|---|
-| CarPlay Wi-Fi | `BMW<last 5 of VIN> CarPlay`, **2.4 GHz only**, channel 11, HT20, one stream | `iw` scan from the box |
-| Security | WPA + WPA2 mixed, TKIP group cipher, TKIP/CCMP pairwise (why iOS says "Weak Security") | same |
+| CarPlay Wi-Fi | `BMW<last 5 of VIN> CarPlay`, observed on **2.4 GHz**, channel 11, HT20, one stream (F32) | `iw` scan from the box |
+| Security | Beacon offers WPA + WPA2, TKIP group cipher, TKIP/CCMP pairwise (why iOS says "Weak Security"). The negotiated pairwise/group wasn't recorded in P2; carplayd now logs it on every join | same |
 | "Internet available" signal | 802.11u Interworking, Internet bit **0**; no Apple Device IE | same |
 | Head unit | `172.16.224.1`, is the access point, sends **no** IPv6 RAs | neighbour table, 30 s capture |
 | DHCP | 172.16.224.0/24, no router, no DNS; iPhone `.110`, box `.127` | box and phone |
@@ -44,7 +44,7 @@ flowchart LR
 - **The CarPlay network page** hides IP settings and shows *Check For Internet Access* and *Manage CarPlay*. The same network under **Settings → Wi-Fi → Edit → Known Networks** shows the full page: Password (with Copy), Private Wi-Fi Address and **Configure IP**.
 - **Check For Internet Access is a button, not a toggle.** If the network passes, *Use For Internet* appears ([DiPlay #393](https://github.com/shihabal3amri/DiPlay/issues/393) screenshots match what we saw). iOS 27 beta 3 added it ([betaprofiles](https://forum.betaprofiles.com/t/whats-new-in-ios-27-beta-3/23195?page=2)).
 - **iOS took the SLAAC address and RDNSS from the box with no settings changed.** Its probe passed over an IPv6-only path.
-- **Why a CarPlay network normally carries no internet** (Apple's open-source configd and xnu): a service ranked `Never` keeps only a *scoped* default route, and the kernel installs an unscoped default only on configd's primary interface. Wired CarPlay is configured `PrimaryRank = Never`. *Use For Internet* evidently lifts that for the Wi-Fi network.
+- **Why a CarPlay network normally carries no internet** (Apple's open-source configd and xnu): a service ranked `Never` keeps only a *scoped* default route, and the kernel installs an unscoped default only on configd's primary interface. Wired CarPlay is configured `PrimaryRank = Never`. Our hypothesis is that *Use For Internet* lifts that for the Wi-Fi network; it hasn't been traced on the device.
 - **Darwin asks for AAAA records on a ULA-only network.** configd requests AAAA for any IPv6 service with a default route and never checks for ULA. A routed public /64 wasn't needed.
 
 ## Other ways that work or would work
@@ -60,7 +60,7 @@ flowchart LR
 
 - **Reading the password** by sniffing the WPA handshake (10 random characters is out of reach) or from Bluetooth (encrypted). Unnecessary anyway: iOS shows it.
 - **The Apple Device IE** (OUI `00:A0:40`, flag bit 11 *InternetAccess*, from a copy of Apple's AccessorySDK header). The layout is real, but the NBT EVO doesn't send it. It signals with the 802.11u Interworking element instead.
-- **Prior art.** Apart from ksweber's 2022 manual-IPv4 setup, ~30 searches in four languages and GitHub code search found nobody giving a factory CarPlay network internet from a second device. The IPv6/iOS 27 route appears to be new.
+- **Prior art.** Apart from ksweber's 2022 manual-IPv4 setup, ~30 searches in four languages and GitHub code search found no public implementation that gives a factory CarPlay network internet from a second device. We found no prior description of the IPv6/iOS 27 route; that doesn't prove there is none.
 - **Several research-agent "quotes" were made up.** Every claim in these docs was re-checked against a fetched source or the device. Bimmerfest and the Apple forums block bots; `https://r.jina.ai/<url>` reads them.
 
 ## Still open

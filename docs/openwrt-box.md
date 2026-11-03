@@ -6,8 +6,8 @@ Until it's built, garage-sbc does the job on its own: `scripts/carplay-box.sh` (
 
 | Requirement | Why |
 |---|---|
-| **2.4 GHz** Wi-Fi client (STA) | The NBT EVO's CarPlay AP is 2.4 GHz only, channel 11, HT20 |
-| WPA/WPA2 mixed with TKIP group cipher | `encryption 'psk-mixed'`; every OpenWrt `wpad` build has TKIP |
+| **2.4 GHz** Wi-Fi client (STA) | The tested F32's CarPlay AP was observed on 2.4 GHz, channel 11, HT20 |
+| WPA/WPA2 mixed with TKIP group cipher | must accept the TKIP group: `encryption 'psk-mixed'` until the negotiated ciphers are known; every OpenWrt `wpad` build has TKIP |
 | Ethernet WAN | Garage LAN, native IPv6 (gets a global address + default route) |
 | odhcpd RA server on the STA interface | Same RA that worked from garage-sbc: ULA /64, router lifetime 60 s, RDNSS |
 | fw4 `masq6` on wan | NAT66 for the ULA (worked in P2; a routed /64 from OPNsense is optional) |

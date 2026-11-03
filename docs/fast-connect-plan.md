@@ -32,7 +32,7 @@ sequenceDiagram
   Ph->>Ph: back to cellular (T_cell)
 ```
 
-The goal is **box associated before the phone joins** (`T_assoc < T_phone`), so the phone's own Router Solicitation gets an answer immediately and `T_flow − T_phone` is just SLAAC plus iOS's check. Nothing the box does can speed up `T_ap` (head-unit boot) or `T_phone` (CarPlay's Bluetooth handshake), but the lab phase measures them.
+The goal is **box associated before the phone joins** (`T_assoc < T_phone`), so the phone's own Router Solicitation gets an answer within 0.5 s and `T_flow − T_phone` is just SLAAC plus iOS's check. Nothing the box does can speed up `T_ap` (head-unit boot) or `T_phone` (CarPlay's Bluetooth handshake), but the lab phase measures them.
 
 ### Targets
 
@@ -132,7 +132,7 @@ stateDiagram-v2
 | 1 | **Fast targeted scan while disconnected**: only the car's channel, only its SSID, every 1 s | own poller (`iw … scan freq 2462 ssid …`) → join; or take `wlan0` from NM and run wpa_supplicant with `autoscan=periodic:1`, `disable_scan_offload=1`, per-car `scan_freq` (NM's channel lock doesn't narrow scans) | already rescans every 1 s (OpenWrt patch); add `scan_list '<car channels>'` on the 2.4 GHz radio so each scan is one or two channels (~100 ms) | up to 120 s → ≤ 1.5 s |
 | 2 | **Lock the car**: BSSID + channel | `802-11-wireless.bssid`, `.channel 11`, `.band bg` | `option bssid '<car AP MAC>'` | candidate selection, ~0.1 s |
 | 3 | **Act on CONNECTED, not on DHCP** | static `172.16.224.254/24` + ULA on the connection, BSSID as the "is this the car" guard; DHCP lease optional | ULA + `.254` on a static alias; react to the ubus `wpa_supplicant.<if>` state event | 1–3 s |
-| 4 | **RA ready at link-up, answer RS at once** | carplayd sends the RA itself on CONNECTED, then every 3–4 s; `accept_dad=0` on the STA. (radvd fallback: `IgnoreIfMissing on`, `MinRtrAdvInterval 3; MaxRtrAdvInterval 4`, reload on connect) | carplayd as on the SBC; or odhcpd `ra_default 1`, `ra_mininterval 3`, `ra_maxinterval 4`, `accept_dad=0` | ≤ 16 s → ≤ 0.1–4 s |
+| 4 | **RA ready at link-up, answer RS fast (RFC 4861: within 0–0.5 s)** | carplayd sends the RA itself on CONNECTED, then every random 3–4 s (≥ 3 s between multicasts), RS and new-device MLD answered by unicast after 0–0.5 s; `accept_dad=0` on the STA. (radvd fallback: `IgnoreIfMissing on`, `MinRtrAdvInterval 3; MaxRtrAdvInterval 4`, reload on connect) | carplayd as on the SBC; or odhcpd `ra_default 1`, `ra_mininterval 3`, `ra_maxinterval 4`, `accept_dad=0` | ≤ 16 s → ≤ 0.1–4 s |
 | 5 | **Power save off** on the STA | `iw dev wlan0 set power_save off` (NM already sets `wifi.powersave=2` when connected) | `iw dev <sta> set power_save off` from the CONNECTED hook (no UCI option assumed) | tens to hundreds of ms per RS/RA |
 | 6 | **Leave cleanly**: RSSI below threshold → goodbye RA (router lifetime 0) while still associated, then disconnect | carplayd `SIGNAL_POLL` 1 s, per-car goodbye | `ubus call wpa_supplicant.<sta> control '{"command":"SIGNAL_MONITOR THRESHOLD=-82 HYSTERESIS=4"}'` (ath11k uses software CQM from beacons; works because OpenWrt has no bgscan) or carplayd `SIGNAL_POLL` | 60 s → ≤ 2 s |
 | 7 | **Precomputed PSK** (`psk=<64 hex>`) | wpa_supplicant config | `option key` with 64-hex | ~10 ms |
