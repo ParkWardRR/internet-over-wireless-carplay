@@ -1,5 +1,7 @@
 # IPv4 options that don't fight the car
 
+> **Status (2026-11-02):** not needed. The IPv6 route worked in P2 ([findings.md](findings.md)). The simplest IPv4 fallback is still ksweber's manual setup (phone Configure IP → `.5` / router `.254`), which iOS 27 allows via Known Networks.
+
 The car's DHCP gives the iPhone `172.16.224.x/24`, no router, no DNS. Racing that DHCP server is crude: it contradicts the car. These options work *with* what the car hands out.
 
 | # | Idea | Why it's clean | Catch | Odds | Test cost |
