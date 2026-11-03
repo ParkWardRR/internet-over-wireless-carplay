@@ -368,7 +368,9 @@ func (d *daemon) onConnected() {
 		d.ev("connected_unknown", kv["ssid"])
 		return
 	}
-	d.ev("connected", car.ID, kv["bssid"])
+	// What was actually negotiated (the scan only shows what the car offers).
+	d.ev("connected", car.ID, kv["bssid"], "freq="+kv["freq"], "key_mgmt="+kv["key_mgmt"],
+		"pairwise="+kv["pairwise_cipher"], "group="+kv["group_cipher"], "wifi_generation="+kv["wifi_generation"])
 	d.m.inc("joins")
 	if t, ok := d.firstSeen[car.ID]; ok {
 		d.m.set(func(m *metrics) { m.detect = time.Since(t).Seconds() })
