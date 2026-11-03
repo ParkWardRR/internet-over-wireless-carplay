@@ -52,6 +52,22 @@ Then read the car's beacon flags: `scripts/car-ie.sh` (allow Location for CarIE 
 | `InternetAccess` (bit 11) | |
 | Interworking element present? Internet bit? | |
 
+## P2 on garage-sbc (Banana Pi in the car)
+
+`garage-sbc.local` (Banana Pi, Allwinner sun55iw3, Debian 12, NetworkManager) is the test box: `eth0` wired to the garage LAN, onboard Broadcom Wi-Fi (`wlan0`, dual-band) joins the car. It also runs the Brother label printer services; the test touches none of them. `scripts/poc-linux.sh` is deployed to `~/carplay-poc/` with `carplay.env` (0600). radvd and tcpdump are installed, radvd disabled at boot. Drive it over SSH from the Mac:
+
+```sh
+ssh user@garage-sbc.local
+cd ~/carplay-poc
+sudo ./poc-linux.sh ie            # P1: band, cipher, Apple Device IE flags (InternetAccess bit)
+sudo ./poc-linux.sh up            # join BMW… CarPlay, radvd + NAT66, .254 + NAT44
+sudo ./poc-linux.sh capture 120   # passive: head unit RAs? DHCP server address?
+sudo ./poc-linux.sh status        # iPhone's SLAAC address, NAT packet counters
+sudo ./poc-linux.sh down          # undo everything
+```
+
+Then the iPhone steps from `up`'s output: IPv6 first (tap Check For Internet Access → Use For Internet), then the manual IPv4 setup, then back to Automatic. Run CarNet Probe for each and log the results in the P2 table below.
+
 ## P2 — MacBook proof of concept (IPv6 RA)
 
 1. `cp secrets.example.env secrets/carplay.env` and fill in the SSID + PSK.
