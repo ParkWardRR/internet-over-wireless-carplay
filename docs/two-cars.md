@@ -1,6 +1,6 @@
 # Two cars
 
-How the garage box serves the **F32** (car A, `BMW13031 CarPlay`) and the **F22 M240i** (car B, `BMW39478 CarPlay`): either one, or occasionally both at once. It builds on [fast-connect-plan.md](fast-connect-plan.md). The EWS377AP is the production box once flashed; until then **build-host** (simulation, builds, analysis) and **garage-sbc** (real cars) carry the work.
+How the garage box serves the **F32** (car A, `BMW##### CarPlay`) and the **F22 M240i** (car B, `BMW##### CarPlay`): either one, or occasionally both at once. It builds on [fast-connect-plan.md](fast-connect-plan.md). The EWS377AP is the production box once flashed; until then **build-host** (simulation, builds, analysis) and **garage-sbc** (real cars) carry the work.
 
 ## What we know, and what we're assuming
 

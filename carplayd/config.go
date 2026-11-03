@@ -13,7 +13,7 @@ import (
 // Car is one car's CarPlay network and how we treat it.
 type Car struct {
 	ID       string       // "A", "B": names the [car X] section
-	SSID     string       // e.g. "BMW13031 CarPlay"
+	SSID     string       // e.g. "BMW00001 CarPlay"
 	PSK      string       // 10 characters on the NBT EVO
 	Channel  int          // 2.4 GHz channel number
 	BSSID    string       // optional: only join this AP
@@ -77,7 +77,7 @@ func defaultCar(id string) Car {
 //	phy = phy0
 //	dns = 2001:db8::53
 //	[car A]
-//	ssid = BMW13031 CarPlay
+//	ssid = BMW00001 CarPlay
 //	psk = ...
 //	channel = 11
 //	prefix = fd5c:ba1e:f32:a::/64

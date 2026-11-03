@@ -16,13 +16,13 @@ phy = phy0
 dns = 2001:db8:ffff::53
 hunt = 500ms
 [car A]
-ssid = BMW13031 CarPlay
-psk = ZrC3OdgOiC
+ssid = BMW00001 CarPlay
+psk = TestPSKcarA
 channel = 11
 priority = 1
 [car B]
-ssid = BMW39478 CarPlay
-psk = D3jxTWAv4y
+ssid = BMW00002 CarPlay
+psk = TestPSKcarB
 channel = 6
 join = -78
 leave = -82
@@ -44,7 +44,7 @@ func TestParseConfig(t *testing.T) {
 		t.Fatalf("cars = %d", len(cfg.Cars))
 	}
 	a, b := cfg.Cars[0], cfg.Cars[1]
-	if a.SSID != "BMW13031 CarPlay" || a.Freq() != 2462 || a.Priority != 1 {
+	if a.SSID != "BMW00001 CarPlay" || a.Freq() != 2462 || a.Priority != 1 {
 		t.Errorf("car A = %+v", a)
 	}
 	if b.Freq() != 2437 || b.Join != -78 || b.Leave != -82 || b.Rejoin != -75 {
@@ -142,11 +142,11 @@ func TestGoodbyeRA(t *testing.T) {
 
 func TestParseScanResults(t *testing.T) {
 	r := "bssid / frequency / signal level / flags / ssid\n" +
-		"02:00:00:00:01:00\t2462\t-48\t[WPA-PSK-CCMP+TKIP][WPA2-PSK-CCMP+TKIP][ESS]\tBMW13031 CarPlay\n" +
-		"02:00:00:00:02:00\t2437\t-71\t[WPA2-PSK-CCMP][ESS]\tBMW39478 CarPlay\n" +
+		"02:00:00:00:01:00\t2462\t-48\t[WPA-PSK-CCMP+TKIP][WPA2-PSK-CCMP+TKIP][ESS]\tBMW00001 CarPlay\n" +
+		"02:00:00:00:02:00\t2437\t-71\t[WPA2-PSK-CCMP][ESS]\tBMW00002 CarPlay\n" +
 		"aa:bb:cc:dd:ee:ff\t2412\t-30\t[ESS]\t\n"
 	s := parseScanResults(r)
-	if len(s) != 3 || s[0].Signal != -48 || s[0].Freq != 2462 || s[0].SSID != "BMW13031 CarPlay" || s[2].SSID != "" {
+	if len(s) != 3 || s[0].Signal != -48 || s[0].Freq != 2462 || s[0].SSID != "BMW00001 CarPlay" || s[2].SSID != "" {
 		t.Fatalf("%+v", s)
 	}
 }
@@ -155,8 +155,8 @@ func scan(entries ...scanEntry) []scanEntry { return entries }
 
 func TestPick(t *testing.T) {
 	cfg := mustConfig(t, sampleConf)
-	a := scanEntry{BSSID: "02:00:00:00:01:00", Freq: 2462, Signal: -60, SSID: "BMW13031 CarPlay"}
-	b := scanEntry{BSSID: "02:00:00:00:02:00", Freq: 2437, Signal: -50, SSID: "BMW39478 CarPlay"}
+	a := scanEntry{BSSID: "02:00:00:00:01:00", Freq: 2462, Signal: -60, SSID: "BMW00001 CarPlay"}
+	b := scanEntry{BSSID: "02:00:00:00:02:00", Freq: 2437, Signal: -50, SSID: "BMW00002 CarPlay"}
 	held := map[string]bool{}
 
 	if c, _, ok := pick(cfg.Cars, held, scan(b)); !ok || c.ID != "B" {
@@ -197,8 +197,8 @@ func TestPick(t *testing.T) {
 }
 
 func TestPickBSSIDPin(t *testing.T) {
-	cfg := mustConfig(t, "[car A]\nssid = BMW13031 CarPlay\npsk = 12345678\nbssid = BC:30:7E:00:00:01\n")
-	right := scanEntry{BSSID: "bc:30:7e:00:00:01", Freq: 2462, Signal: -60, SSID: "BMW13031 CarPlay"}
+	cfg := mustConfig(t, "[car A]\nssid = BMW00001 CarPlay\npsk = 12345678\nbssid = BC:30:7E:00:00:01\n")
+	right := scanEntry{BSSID: "bc:30:7e:00:00:01", Freq: 2462, Signal: -60, SSID: "BMW00001 CarPlay"}
 	spoof := right
 	spoof.BSSID = "02:00:00:00:00:99"
 	spoof.Signal = -30
@@ -230,7 +230,7 @@ func TestWPAConfig(t *testing.T) {
 	cfg := mustConfig(t, sampleConf)
 	w := wpaConfig(cfg)
 	for _, want := range []string{
-		`ssid="BMW13031 CarPlay"`, "scan_freq=2462", "freq_list=2437", `id_str="B"`,
+		`ssid="BMW00001 CarPlay"`, "scan_freq=2462", "freq_list=2437", `id_str="B"`,
 		"disabled=1", `bgscan=""`, "ctrl_interface=/var/run/carplayd",
 	} {
 		if !strings.Contains(w, want) {
@@ -288,7 +288,7 @@ func TestPhonesInCompressed(t *testing.T) {
 }
 
 func TestUnknownChannel(t *testing.T) {
-	cfg := mustConfig(t, "[car A]\nssid = BMW13031 CarPlay\npsk = 12345678\nchannel = 11\n[car B]\nssid = BMW39478 CarPlay\npsk = 87654321\nchannel = 0\n")
+	cfg := mustConfig(t, "[car A]\nssid = BMW00001 CarPlay\npsk = 12345678\nchannel = 11\n[car B]\nssid = BMW00002 CarPlay\npsk = 87654321\nchannel = 0\n")
 	b := cfg.Cars[1]
 	if b.Freq() != 0 {
 		t.Fatalf("freq %d", b.Freq())
@@ -298,7 +298,7 @@ func TestUnknownChannel(t *testing.T) {
 		t.Errorf("hunt freqs %q", f)
 	}
 	// Car B is matched on any channel; car A only on 11.
-	seen := []scanEntry{{SSID: "BMW39478 CarPlay", Freq: 2437, Signal: -60}, {SSID: "BMW13031 CarPlay", Freq: 2437, Signal: -40}}
+	seen := []scanEntry{{SSID: "BMW00002 CarPlay", Freq: 2437, Signal: -60}, {SSID: "BMW00001 CarPlay", Freq: 2437, Signal: -40}}
 	if c, _, ok := pick(cfg.Cars, map[string]bool{}, seen); !ok || c.ID != "B" {
 		t.Errorf("pick = %v %v (A on the wrong channel must not count)", c.ID, ok)
 	}

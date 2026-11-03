@@ -31,7 +31,7 @@ rsync -a --delete --exclude secrets/ --exclude .git/ --exclude emu/out/ --exclud
 ssh "$BUILD" 'mkdir -p ~/builds/carplay-deploy && cd ~/builds/carplay-deploy && emu/run.sh carplayd' | tail -1
 scp -q "$BUILD:builds/carplay-deploy/emu/out/carplayd-arm64" "$TMP/carplayd"
 
-# The F32 is car B in secrets (BMW13031), the F22 car A (BMW39478); carplayd
+# The F32 is car B in secrets (BMW#####), the F22 car A (BMW#####); carplayd
 # calls the F32 "A" (priority) and the F22 "B".
 umask 077
 cat > "$TMP/carplayd.conf" <<CONF

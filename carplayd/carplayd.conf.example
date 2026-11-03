@@ -31,7 +31,7 @@ dns = 2001:4860:4860::8888, 2606:4700:4700::1111
 #metrics = 127.0.0.1:9101
 
 [car A]
-ssid = BMW13031 CarPlay
+ssid = BMW00001 CarPlay
 # From the iPhone: Settings > Wi-Fi > Edit > Known Networks > the car > Password
 psk = CHANGE-ME-PSK
 # channel 0 = unknown: hunt on all of 2.4 GHz and log where the car is seen
@@ -45,6 +45,6 @@ priority = 1
 #rejoin = -76
 
 [car B]
-ssid = BMW39478 CarPlay
+ssid = BMW00002 CarPlay
 psk = CHANGE-ME-PSK
 channel = 0
