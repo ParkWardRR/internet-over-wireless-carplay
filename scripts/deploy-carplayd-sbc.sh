@@ -17,7 +17,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 if [ "${1:-}" = rollback ]; then
-	ssh "$SBC" 'sudo systemctl disable --now carplayd 2>/dev/null; sudo rm -f /etc/NetworkManager/conf.d/90-carplayd.conf; sudo nmcli general reload; sudo nmcli dev set wlan0 managed yes; cd ~/carplay-poc && sudo ./carplay-box.sh install'
+	ssh "$SBC" 'sudo systemctl disable --now carplayd 2>/dev/null; sudo /usr/sbin/nft delete table inet carplayd 2>/dev/null; sudo rm -f /etc/NetworkManager/conf.d/90-carplayd.conf; sudo nmcli general reload; sudo nmcli dev set wlan0 managed yes; cd ~/carplay-poc && sudo ./carplay-box.sh install'
 	exit 0
 fi
 
@@ -38,7 +38,8 @@ cat > "$TMP/carplayd.conf" <<CONF
 phy = phy0
 sta = wlan0
 uplink = eth0
-nat66 = ip6tables
+nat66 = nft
+firewall = nft
 events = /var/log/carplayd.events
 metrics = :9111
 
@@ -62,6 +63,8 @@ CONF
 
 scp -q "$TMP/carplayd" "$TMP/carplayd.conf" "$HERE/carplayd/dist/carplayd.service" "$SBC:/tmp/"
 ssh "$SBC" 'set -e
+# carplayd isolates the car link and NATs with its own nftables table.
+[ -x /usr/sbin/nft ] || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q nftables >/dev/null
 sudo install -m 755 /tmp/carplayd /usr/local/sbin/carplayd
 sudo install -m 600 /tmp/carplayd.conf /etc/carplayd.conf
 sudo install -m 644 /tmp/carplayd.service /etc/systemd/system/carplayd.service
@@ -76,5 +79,6 @@ sudo systemctl restart carplayd
 sleep 3
 systemctl is-active carplayd
 sudo tail -4 /var/log/carplayd.events | sed -E "s/BMW[0-9]{5}/BMW#####/g"
-curl -s localhost:9111 | grep -E "^carplayd_(serving|signal|phones)"'
+sudo /usr/sbin/nft list table inet carplayd | grep -cE "reject|drop|masquerade" | sed "s/^/nft rules: /"
+curl -s localhost:9111 | grep -E "^carplayd_(serving|signal|phones|upstream)"'
 echo "deployed. rollback: $0 rollback"

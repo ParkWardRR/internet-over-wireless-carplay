@@ -6,12 +6,33 @@
 phy = phy0
 sta = phy0-sta0
 
-# NAT66: "none" when fw4 masq6 does it (OpenWrt), "ip6tables" + uplink on Debian.
-nat66 = none
+# The interface toward the internet. Needed for NAT66 and for the firewall to
+# know the home LAN (its on-link prefixes, widened to /56, are blocked).
 #uplink = eth0
+
+# NAT66: "none" when fw4 masq6 does it (OpenWrt), "nft" (or "ip6tables") on Debian.
+nat66 = none
+
+# Isolation (default nft): a phone on the car Wi-Fi reaches the internet only.
+# carplayd's own nftables table drops everything from the car link to the box
+# except ICMPv6 (ND, RS) and rejects forwarding to ULA, link-local, the home
+# LAN, the other car, and anything not leaving via the uplink.
+#firewall = nft
+# more destinations phones must not reach (other home networks)
+#block = 2001:db8:100::/48
 
 # DNS servers advertised to phones (RDNSS).
 dns = 2001:4860:4860::8888, 2606:4700:4700::1111
+
+# Upstream health: while none of the targets accepts a TCP connection (2 s
+# timeout; health_fail checks in a row), carplayd withdraws the route (router,
+# RDNSS and preferred lifetimes 0) but stays on the car, so the phone falls
+# back to cellular and gets the route back as soon as a check passes.
+#health = on
+#health_interval = 3s
+#health_fail = 2
+# default: each dns server, port 53
+#health_target = [2001:4860:4860::8888]:53
 
 # Timing. Defaults shown.
 # hunt: scan period while no car is served
@@ -20,7 +41,10 @@ dns = 2001:4860:4860::8888, 2606:4700:4700::1111
 #poll = 1s
 # leave_for: below the leave threshold this long, then goodbye + leave
 #leave_for = 3s
-#ra_interval = 3s
+# ra_interval: MaxRtrAdvInterval (RFC 4861, at least 4s). Periodic multicast
+# RAs go out every random 3-4 s, never closer than 3 s; a Router Solicitation
+# (or a new device's first MLD report) is answered by unicast after 0-0.5 s.
+#ra_interval = 4s
 # router_lifetime: an abrupt drive-out strands a phone at most this long
 #router_lifetime = 20s
 # idle_switch: serve another car once the served one has had no phone this long

@@ -20,7 +20,10 @@
 #   emu.sh box-apply A|B            configure the box for one car (openwrt-carplay.sh)
 #   emu.sh box-carplayd A [B]       run carplayd on the box instead
 #   emu.sh car A|B on|off|power <dBm>|range in|out
-#   emu.sh phone A|B join|leave|check
+#   emu.sh phone A|B join|leave|check|rs
+#   emu.sh upstream down|up            the internet behind the box fails / returns
+#   emu.sh isolation A|B               what phone X can reach (EV reach ...)
+#   emu.sh capture start|stop          tcpdump RS/RA on the box's car link
 #   emu.sh wait <condition> <timeout_s>   box-assoc|box-disassoc|phone-route A|B|phone-noroute A|B
 set -u
 STATE=/tmp/emu
@@ -140,6 +143,7 @@ EOF
 	uci set "firewall.$wanz.masq6=1"; uci commit firewall; /etc/init.d/firewall restart 2>/dev/null
 	{
 		echo "phy = $(phy 0)"; echo "sta = phy0-sta0"; echo "dns = 2001:db8:ffff::53"
+		echo "uplink = wan0"; echo "firewall = ${CARPLAYD_FIREWALL:-nft}"
 		echo "events = $STATE/carplayd.events"; echo "hunt = ${CARPLAYD_HUNT:-1s}"
 		for id in "$@"; do
 			echo "[car $id]"; echo "ssid = $(ssid "$id")"; echo "psk = $(psk "$id")"; echo "channel = $(chan "$id")"
@@ -248,16 +252,63 @@ phone() {
 		rm -f "$STATE/wpa-ph$id.pid"; nsx "$ns" ip addr flush dev "$dev" 2>/dev/null
 		ev phone_leave "$id"
 		;;
+	rs) nsx "$ns" emuagent rs "$dev" ;;
 	check)
 		out=$(nsx "$ns" uclient-fetch -q -T 3 -O - http://captive.apple.com/hotspot-detect.html 2>/dev/null)
 		case $out in *Success*) ev phone_internet "$id" ok ;; *) ev phone_internet "$id" fail; return 1 ;; esac
 		;;
-	*) die "phone $id join|leave|check" ;;
+	*) die "phone $id join|leave|check|rs" ;;
+	esac
+}
+
+# The ISP fails beyond the box: wan0 stays up and configured, but nothing
+# answers (replies to the box's prefix are prohibited in the fake internet).
+upstream() {
+	case $1 in
+	down) nsx inet ip -6 route add prohibit 2001:db8:f00d::/64 metric 1 ;;
+	up) nsx inet ip -6 route del prohibit 2001:db8:f00d::/64 metric 1 ;;
+	*) die "upstream down|up" ;;
+	esac
+	ev upstream "$1"
+}
+
+# What a phone on car X's Wi-Fi can open a TCP connection to. Only the
+# internet should answer: not the box (SSH, web UI) on any of its addresses,
+# not the home LAN behind the uplink, not the other car's network.
+isolation() {
+	id=$1 ns=phone$1 dev=ph-$(lc "$1")0
+	pfx=fd5c:ba1e:f32:$(lc "$1")
+	other=fd5c:ba1e:f32:$( [ "$id" = A ] && echo b || echo a )
+	# A "home LAN" web server next to the box's uplink.
+	[ -f "$STATE/home-www.pid" ] || { nsx inet uhttpd -f -p "[2001:db8:f00d::1]:8080" -h "$STATE/www" </dev/null >/dev/null 2>&1 & echo $! > "$STATE/home-www.pid"; sleep 1; }
+	ll=$(nsx "$ns" ip -6 route show default | sed -n 's/.* via \(fe80::[^ ]*\) .*/\1/p' | head -1)
+	nsx "$ns" emuagent tcp internet_http "[2001:db8:ffff::1]:80"
+	nsx "$ns" emuagent tcp internet_dns "[2001:db8:ffff::53]:53"
+	nsx "$ns" emuagent tcp home_lan "[2001:db8:f00d::1]:8080"
+	nsx "$ns" emuagent tcp box_uplink_ssh "[2001:db8:f00d::2]:22"
+	nsx "$ns" emuagent tcp box_car_ssh "[$pfx::1]:22"
+	nsx "$ns" emuagent tcp box_car_web "[$pfx::1]:80"
+	[ -n "$ll" ] && nsx "$ns" emuagent tcp box_ll_ssh "[$ll%$dev]:22"
+	nsx "$ns" emuagent tcp other_car "[$other::1]:22"
+}
+
+# Every RS and RA on the box's car link, as tcpdump -v text, for the harness
+# to check RFC 4861 timing and the withdrawal contents.
+capture() {
+	case $1 in
+	start)
+		(tcpdump -i phy0-sta0 -n -tt -v -l 'icmp6 and (ip6[40] == 133 or ip6[40] == 134)' >"$STATE/ra.txt" 2>"$STATE/ra.err" </dev/null &)
+		sleep 1; ev capture_start ;;
+	stop) killall tcpdump 2>/dev/null; sleep 1; ev capture_stop; echo "----- capture"; cat "$STATE/ra.txt" ;;
+	*) die "capture start|stop" ;;
 	esac
 }
 
 case ${1:-} in
 	setup) setup ;;
+	upstream) upstream "$2" ;;
+	isolation) isolation "$2" ;;
+	capture) capture "$2" ;;
 	box-apply) box_apply "$2" ;;
 	box-carplayd) shift; box_carplayd "$@" ;;
 	carplayd-restart) carplayd_restart ;;
