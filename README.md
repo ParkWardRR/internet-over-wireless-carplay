@@ -80,6 +80,9 @@ Sniffing it is out (10 random characters) and so is Bluetooth (encrypted).
 | [docs/findings.md](docs/findings.md) | What we learned and why it works |
 | [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | Lab telemetry + fast connect/leave/reconnect plan (EnGenius OpenWrt) |
 | [docs/two-cars.md](docs/two-cars.md) | F32 + F22: scenarios, per-car prefixes, carplayd, radios, arbitration, build-host simulator |
+| [docs/emulator.md](docs/emulator.md), [docs/emulator-results.md](docs/emulator-results.md) | The box firmware emulated on build-host; stock vs carplayd numbers |
+| `carplayd/` | The Go controller (deployed on garage-sbc) |
+| `emu/` | Emulator: OpenWrt image build, `emu.sh`, Go agent + harness |
 | [docs/test-log.md](docs/test-log.md) | Every test, dated |
 | [docs/ipv6-route.md](docs/ipv6-route.md) | IPv6 design, reachability, permanent-box recipe |
 | [docs/iphone-diagnostics.md](docs/iphone-diagnostics.md) | rvictl capture, iOS logs, CarNet Probe |
