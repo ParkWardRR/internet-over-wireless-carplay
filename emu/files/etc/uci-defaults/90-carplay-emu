@@ -1,0 +1,15 @@
+#!/bin/sh
+# Emulator management: eth0 (QEMU user net) gets a DHCP address so the harness
+# reaches SSH through QEMU's hostfwd. The client shows up with build-host's own
+# address, so the box must never get an IPv4 default route anywhere else.
+# The test topology is built by emu.sh, not here.
+uci set network.lan.proto='dhcp'
+uci -q delete network.lan.ipaddr
+uci -q delete network.lan.netmask
+uci -q delete network.lan.ip6assign
+uci set dhcp.lan.ignore='1'
+uci set dhcp.lan.ra='disabled'
+uci set dhcp.lan.dhcpv6='disabled'
+uci commit network
+uci commit dhcp
+exit 0
