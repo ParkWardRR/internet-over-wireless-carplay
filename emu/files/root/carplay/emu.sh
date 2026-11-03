@@ -18,7 +18,7 @@
 #
 #   emu.sh setup                    build the topology (once per boot)
 #   emu.sh box-apply A|B            configure the box for one car (openwrt-carplay.sh)
-#   emu.sh car A|B on|off|power <dBm>
+#   emu.sh car A|B on|off|power <dBm>|range in|out
 #   emu.sh phone A|B join|leave|check
 #   emu.sh wait <condition> <timeout_s>   box-assoc|box-disassoc|phone-route A|B|phone-noroute A|B
 set -u
@@ -45,6 +45,11 @@ phy() {
 	done
 }
 nsx() { ns=$1; shift; ip netns exec "$ns" "$@"; }
+# Who hears whom (mac80211_hwsim "group" bitmask: radios hear each other only if
+# their groups overlap). 1 = garage air around the box, 2 = car A cabin,
+# 4 = car B cabin. A car in the garage is 1+cabin; driving out drops the 1, so
+# the box loses it while the phone in the cabin stays connected.
+setgroup() { echo "$2" > "/sys/kernel/debug/ieee80211/$(phy "$1")/hwsim/group"; }
 
 setup() {
 	[ -f "$STATE/setup.done" ] && { echo "already set up"; return; }
@@ -57,6 +62,7 @@ setup() {
 		for d in $(nsx "$ns" ls "/sys/class/ieee80211/$p/device/net" 2>/dev/null); do nsx "$ns" iw dev "$d" del; done
 		nsx "$ns" iw phy "$p" interface add "$dev" type managed; }
 	move 1 carA car-a0; move 2 carB car-b0; move 3 phoneA ph-a0; move 4 phoneB ph-b0
+	setgroup 0 1; setgroup 1 3; setgroup 2 5; setgroup 3 2; setgroup 4 4; setgroup 5 1
 
 	# Fake internet behind the box's wan.
 	ip link add wan0 type veth peer name inet0
@@ -147,6 +153,11 @@ EOF
 		[ -f "$STATE/dnsmasq-$id.pid" ] && kill "$(cat "$STATE/dnsmasq-$id.pid")" 2>/dev/null
 		rm -f "$STATE/hostapd-$id.pid" "$STATE/dnsmasq-$id.pid"
 		ev car_off "$id"
+		;;
+	range)
+		idx=$( [ "$id" = A ] && echo 1 || echo 2 ); cabin=$( [ "$id" = A ] && echo 2 || echo 4 )
+		case $3 in in) setgroup "$idx" $((cabin | 1)) ;; out) setgroup "$idx" "$cabin" ;; *) die "range in|out" ;; esac
+		ev car_range "$id" "$3"
 		;;
 	power)
 		nsx "$ns" iw dev "$dev" set txpower fixed "$(( $3 * 100 ))"
