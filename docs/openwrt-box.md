@@ -48,7 +48,7 @@ Flash **vanilla OpenWrt** (24.10 or 25.12), not GL.iNet's stock firmware, so odh
 - **odhcpd on an alias (`@carplay`)**: the ULA lives on an alias interface so the STA can stay `proto dhcp`. If odhcpd doesn't send RAs there, alternatives are `ip6assign 64` with `network.globals.ula_prefix` on `carplay` itself, or `odhcpd` → `radvd` package.
 - **`ra_default '1'`** is required with a ULA-only prefix (otherwise odhcpd advertises router lifetime 0); check `tcpdump -vni <sta> icmp6` shows `router lifetime 60s`.
 - **STA + AP on one radio**: if the router also runs an AP on the 2.4 GHz radio, it must follow the car's channel and drops when the car leaves. Simplest: use the 5 GHz radio for the router's own AP.
-- **Goodbye RA**: odhcpd sends nothing on SIGTERM and keeps a non-zero lifetime with `ra_default 1`. The 60 s lifetime covers the drive-out case anyway (the car is out of range before any goodbye could arrive).
+- **Goodbye RA**: odhcpd sends nothing on SIGTERM. Whether its final RA on interface disable carries router lifetime 0 with `ra_default 1` is disputed between two source readings; check with `tcpdump -vni <sta> icmp6` on `ifdown`. carplayd ([two-cars.md](two-cars.md)) sends its own goodbye, which sidesteps this. Without a goodbye, the 60 s lifetime still bounds the drive-out case.
 
 ## Later
 
