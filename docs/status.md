@@ -20,13 +20,14 @@ Claims are labelled: **measured** (on the car, phone or box), **source** (code o
 | Observation | Consequence |
 |---|---|
 | CarPlay Wi-Fi observed on **2.4 GHz, channel 11**, HT20, one stream | Box needs a 2.4 GHz STA that handles this AP's security, client-to-client IPv6 through the head unit, and reliable reconnects |
-| Beacon offers WPA + WPA2, **TKIP group**, TKIP/CCMP pairwise (iOS: "Weak Security") | Box must accept a TKIP group cipher. The negotiated pairwise/group wasn't recorded; carplayd now logs it on every join. Whether WPA1 (`psk-mixed`) is needed is untested |
+| Beacon offers WPA + WPA2, **TKIP group**, TKIP/CCMP pairwise (iOS: "Weak Security") | **Negotiated (both cars, 2026-11-03): WPA2-PSK, CCMP pairwise, TKIP group, Wi-Fi 4.** The box needs WPA2 with a TKIP group cipher allowed; WPA1 isn't used |
 | DHCP **172.16.224.0/24, no router, no DNS**; head unit = AP at `.1` | No IPv4 internet path. **The link stays dual-stack**: car-local IPv4 plus our IPv6-only internet path |
 | **802.11u Interworking Internet bit = 0**; no Apple Device IE | A box can't change the beacon; iOS 27 tests the network anyway |
 | Head unit sent **no IPv6 RAs**; no head-unit SLAAC address seen in the P2 capture | Our RA was the only router. carplayd counts devices per prefix, so a change would show up |
 | **A second client was allowed**, no client isolation | The box can join next to the phone. Phone ↔ box traffic is **relayed by the head unit**, so the box's car RSSI isn't the phone's path quality |
 | Password: 10 random characters, **visible on iOS 27 without a jailbreak** (Settings → Wi-Fi → Edit → Known Networks → the car → Password) | Stored in `secrets/carplay.env` |
-| F22: likely the same NBT EVO behaviour (inferred), **not measured** | One ULA /64 per car; no IPv4 on car links |
+| F22 (measured by carplayd, 2026-11-03): **channel 11**, same ciphers; a phone joined and solicited. Beacon, DHCP and iOS behaviour not yet checked | Both cars share channel 11. One ULA /64 per car; no IPv4 on car links |
+| Real departure/return with carplayd (F32, 2026-11-03): parked −68…−82 dBm from garage-sbc, edge of range −86…−91; link lost at −89 | Leave −92 is too loose (no goodbye was sent); ≈ −85 would have been |
 
 ### The iPhone (iOS 27.0.1; measured unless noted)
 
