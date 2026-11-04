@@ -165,8 +165,8 @@ func TestPhonesInCountsDevices(t *testing.T) {
 }
 
 func TestHomePrefixes(t *testing.T) {
-	routes := "2600:6c50:7f00:1a2b::/64 proto ra metric 100 pref medium\n" +
-		"2600:6c50:7f00:1a2c::/64 proto kernel metric 256 pref medium\n" +
+	routes := "2001:db8:7f00:1a2b::/64 proto ra metric 100 pref medium\n" +
+		"2001:db8:7f00:1a2c::/64 proto kernel metric 256 pref medium\n" +
 		"fd00:0:0:5::/64 proto kernel metric 256 pref medium\n" +
 		"fe80::/64 proto kernel metric 256 pref medium\n" +
 		"2001:db8:ffff::/48 via fe80::1 metric 1024 pref medium\n" +
@@ -178,7 +178,7 @@ func TestHomePrefixes(t *testing.T) {
 	}
 	// Both home /64s collapse into their /56; the ULA, link-local, the routed
 	// prefix and the default route are not "home".
-	if strings.Join(s, " ") != "2001:db8:100::/48 2600:6c50:7f00:1a00::/56" {
+	if strings.Join(s, " ") != "2001:db8:100::/48 2001:db8:7f00:1a00::/56" {
 		t.Errorf("home prefixes %v", s)
 	}
 }
@@ -200,13 +200,13 @@ func TestOutermost(t *testing.T) {
 
 func TestNFTRuleset(t *testing.T) {
 	c := mustConfig(t, "sta = wlan0\nuplink = eth0\nnat66 = nft\n[car A]\nssid = x\npsk = 12345678\n[car B]\nssid = y\npsk = 12345678\n")
-	r := nftRuleset(c, []netip.Prefix{netip.MustParsePrefix("2600:6c50:7f00:1a00::/56")})
+	r := nftRuleset(c, []netip.Prefix{netip.MustParsePrefix("2001:db8:7f00:1a00::/56")})
 	for _, want := range []string{
 		"table inet carplayd {}\ndelete table inet carplayd\n", // atomic replace
 		`iifname "wlan0" meta l4proto ipv6-icmp accept`,        // ND and RS only...
 		`iifname "wlan0" drop`,                                 // ...nothing else to the box
 		`iifname "wlan0" meta nfproto ipv4 drop`,
-		`iifname "wlan0" ip6 daddr { 2600:6c50:7f00:1a00::/56, fc00::/7, fe80::/10, ff00::/8 } reject`,
+		`iifname "wlan0" ip6 daddr { 2001:db8:7f00:1a00::/56, fc00::/7, fe80::/10, ff00::/8 } reject`,
 		`iifname "wlan0" oifname != "eth0" reject`,
 		`oifname "eth0" ip6 saddr { fd5c:ba1e:f32:a::/64, fd5c:ba1e:f32:b::/64 } counter masquerade`,
 	} {
