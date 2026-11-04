@@ -10,7 +10,7 @@ Claims are labelled: **measured** (on the car, phone or box), **source** (code o
 |---|---|
 | **Proven** | On the tested **F32**, an iPhone (iOS 27.0.1) on the wireless CarPlay network used an added IPv6 internet gateway: *Check For Internet Access → Use For Internet*, then Google Maps search and routing. The phone's IPv4 settings were unchanged (2026-11-02, P2, measured) |
 | **Not yet proven** | Unattended repeatability with carplayd on a real car · cellular handoff timing on the real iPhone · whether iOS remembers *Use For Internet* · app-wide compatibility (IPv4-only services) · F22 equivalence · EWS377 firmware reliability · two-box failover |
-| **Running now** | **carplayd** (our Go controller) on **garage-sbc**, the Banana Pi in the basement, hunting both cars. Not yet exercised on a real car |
+| **Running now** | **carplayd** (our Go controller) on **garage-sbc**, the Banana Pi in the basement, hunting both cars: a scan every 1 s on channel 11, with a full 2.4 GHz sweep every 5th scan for the F22. **Survey mode** since 2026-11-03: each visible car's signal every 10 s, plus seen/gone, to `/var/lib/carplayd/events.log` (SD card, rotated daily, 14 days kept). Not yet exercised on a real car |
 | **Next** | An F32 run with cellular off and carplayd, then a departure with cellular on (time to the first new request over cellular) |
 
 ## What we learned
@@ -148,7 +148,7 @@ flowchart LR
 | 9 | **Two boxes, fixed ownership** (emulator first, then real) | EWS up | me |
 | 10 | **Phone moving between cars**, second driver's phone | real use | you |
 | 11 | **CarNet Probe**: signing + Access Wi-Fi Information entitlement for SSID/BSSID/security. RSSI isn't available through a supported API | developer.apple.com | you |
-| 12 | Ops: rotate `/var/log/carplayd.events`; crash tests that need hardware (power loss, radio removal, firmware stall) | — | me |
+| 12 | Ops: crash tests that need hardware (power loss, radio removal, firmware stall) | — | me |
 | 13 | **Git history** still holds the car PSKs and SSID digits from before the scrub (d654b97). Rewrite (filter-repo + force push) or accept | your call | you |
 | 14 | Fallbacks parked: USB-C Ethernet on the phone, offline maps, booster | — | parked |
 

@@ -30,6 +30,7 @@ type daemon struct {
 	lastPhone    time.Time
 	lastArbScan  time.Time
 	firstSeen    map[string]time.Time
+	lastSurvey   map[string]time.Time // last sighting/signal logged per car (survey)
 	huntTick     int
 	phones       int
 	evFile       *os.File
@@ -307,13 +308,19 @@ func (d *daemon) onScanResults() {
 	seen := parseScanResults(r)
 	now := time.Now()
 	for _, c := range d.cfg.Cars {
-		if _, found := best(c, seen); found {
+		if e, found := best(c, seen); found {
 			if _, ok := d.firstSeen[c.ID]; !ok {
 				d.firstSeen[c.ID] = now
-				e, _ := best(c, seen)
 				d.ev("seen", c.ID, strconv.Itoa(e.Freq), strconv.Itoa(e.Signal), e.BSSID)
+				d.lastSurvey[c.ID] = now
+			} else if surveyDue(d.lastSurvey[c.ID], now, d.cfg.Survey) {
+				d.ev("sighting", c.ID, strconv.Itoa(e.Freq), strconv.Itoa(e.Signal), e.BSSID)
+				d.lastSurvey[c.ID] = now
 			}
 		} else if d.serving == nil || c.ID != d.serving.ID {
+			if t, ok := d.firstSeen[c.ID]; ok {
+				d.ev("gone", c.ID, fmt.Sprintf("%.0fs", now.Sub(t).Seconds()))
+			}
 			delete(d.firstSeen, c.ID)
 		}
 	}
@@ -440,6 +447,10 @@ func (d *daemon) poll() {
 			d.lastPhone = now
 		}
 		d.m.set(func(m *metrics) { m.signal, m.phones = sig, n })
+		if surveyDue(d.lastSurvey[d.serving.ID], now, d.cfg.Survey) {
+			d.ev("signal", d.serving.ID, strconv.Itoa(sig), "phones="+strconv.Itoa(n))
+			d.lastSurvey[d.serving.ID] = now
+		}
 	}
 	var leave bool
 	d.below, leave = leaveCheck(d.below, now, sig, d.serving.Leave, d.cfg.LeaveFor)

@@ -175,3 +175,9 @@ func withdrawTargets(neigh string, prefix netip.Prefix) []netip.Addr {
 func preempt(servingPrio, otherPrio int, servingSince, lastPhone, now time.Time, grace time.Duration) bool {
 	return otherPrio > servingPrio && lastPhone.IsZero() && now.Sub(servingSince) < grace
 }
+
+// surveyDue: in survey mode (every > 0), log a car's signal again once
+// `every` has passed since the last line for it.
+func surveyDue(last, now time.Time, every time.Duration) bool {
+	return every > 0 && now.Sub(last) >= every
+}

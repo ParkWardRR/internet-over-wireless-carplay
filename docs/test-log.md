@@ -20,6 +20,7 @@ One row per test. Put the PSK, VIN, SSID digits and MACs in `secrets/`, never he
 | 2026-11-03 | review | carplayd unit tests incl. `TestRASchedulerRFC4861` (fake socket, real time) | Pass: unicast RS answer 0.47 s; withdraw/resume unicast at once; multicasts ≥ 3.0 s apart; final multicast router/RDNSS lifetime 0 | |
 | 2026-11-03 | emulator r3 | 17 carplayd scenarios × 3 on build-host, incl. new upstream-loss, isolation, isolation-control, ra-audit | Every booted run passed. ra-audit: min multicast gap 3.00 s, RS answered by unicast ≤ 0.35 s, 0 incomplete withdrawals. Upstream loss: route gone after 6.3–7.1 s, back after 1.9 s, box stays on the car. Isolation: 0/6 leaks (5/6 with the firewall off) | Miss: car B join 1.78 s in 1 of 3 runs ([results](emulator-results.md#round-3-after-the-review)) |
 | 2026-11-03 | garage-sbc | Uplink with forwarding on | `all.forwarding=1`, `eth0.accept_ra=0`; NetworkManager keeps `default via fe80::… proto ra`, so the forwarding/accept_ra trap doesn't apply. nft wasn't installed | Deploy installs nftables |
+| 2026-11-03 | garage-sbc | carplayd redeployed (round-3 code) in survey mode (`survey = 10s`); event log moved to the SD card (Armbian's `/var/log` is zram); logrotate daily, 14 days | Scans confirmed: channel-11 entries ≤ 1 s old, the sweep reaches channel 1; firewall table applied; NAT66 moved from ip6tables to nft; upstream ok | Collecting until the next car session |
 
 ## P0 — iPhone, car network
 
