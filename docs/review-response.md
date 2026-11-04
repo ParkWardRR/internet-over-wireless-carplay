@@ -53,3 +53,21 @@ An outside reviewer audited [status.md](status.md) against the RFCs, Apple's doc
 
 - **The 20 s router lifetime.** The reviewer agreed it's compatible with 3–4 s RAs; its adequacy under garage packet loss is an open real-car question.
 - **Dynamic two-car arbitration on a single box** stays. The reviewer's split-brain point is about two boxes, now fixed ownership.
+
+## Second review: the README (2026-11-04)
+
+A second outside review of the README. It found no new defects; its main point was that the README equated "the box joined and sent the right packets" with "the iPhone had working internet and recovered". Changes:
+
+| Finding | Response |
+|---|---|
+| No end-to-end evidence of phone recovery (graceful, power cut, sudden RF loss) | **Agreed, now first in "What's next"**, ahead of two-car work. The README separates six clocks (association, internet readiness, withdrawal delivery, routing recovery, app recovery, coverage gap); only association has real-car numbers |
+| The coverage gap after leaving the box's range | Added: to map along the real exit route; routing can't fix it |
+| Health checked from the box, not the forwarding path | Already open; now stated in the README |
+| IPv4 is a product limitation, not an enhancement | README says Google Maps only so far; IPv4-only services don't work until NAT64. NAT64 test matrix listed (A-only names, IPv4 literals, own resolvers, VPNs, CarPlay's local IPv4 kept local). PREF64 lifetimes are in 8 s units, so the rounding will be documented |
+| Head unit might use our route | Added as an open item; no head-unit address in the proof-of-concept capture |
+| "Route expires after 20 s" isn't a 20 s handoff | Reworded: it bounds the stale default route only, not DNS, app retries, VPN reconnects or the first cellular request |
+| Withdrawal ≠ all IPv6 state gone | README now has the intended post-withdrawal state per item (route, RDNSS, deprecated address, open connections, return) |
+| "83 connections", "< 0.1 s" undefined | Defined in the README: NAT-rule first packets (connections, not successful requests); join time from first sighting at or above the threshold to association |
+| Isolation needs a threat model | Scoped wording: only ICMPv6 accepted from the car link; home prefixes blocked even when public; NAT64, existing conntrack entries and OpenWrt reload paths listed as not covered; phone ↔ head-unit traffic out of scope |
+| Claims to narrow ("probably", "everything else", "nothing conflicts", "standards-compliant", "new in iOS 27") | All narrowed as suggested |
+| Radio behaviour (RSSI vs phone path, asymmetry, multicast while locked, scan disruption, contention) | Folded into the end-to-end sessions and the two-car tests; "both cars at once" = one radio, one car served at a time |
