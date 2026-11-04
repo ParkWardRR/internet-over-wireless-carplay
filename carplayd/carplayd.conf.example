@@ -52,6 +52,9 @@ dns = 2001:4860:4860::8888, 2606:4700:4700::1111
 
 # Lab: event log and Prometheus metrics.
 #events = /var/log/carplayd.events
+# survey: also log each visible car's signal this often (sighting while
+# hunting, signal while serving) and "gone" when it disappears; 0 = off
+#survey = 10s
 #metrics = 127.0.0.1:9101
 
 [car A]

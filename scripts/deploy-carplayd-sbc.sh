@@ -40,7 +40,8 @@ sta = wlan0
 uplink = eth0
 nat66 = nft
 firewall = nft
-events = /var/log/carplayd.events
+events = /var/lib/carplayd/events.log
+survey = 10s
 metrics = :9111
 
 [car A]
@@ -68,6 +69,11 @@ ssh "$SBC" 'set -e
 sudo install -m 755 /tmp/carplayd /usr/local/sbin/carplayd
 sudo install -m 600 /tmp/carplayd.conf /etc/carplayd.conf
 sudo install -m 644 /tmp/carplayd.service /etc/systemd/system/carplayd.service
+# Lab survey writes ~1 line per car per 10 s: rotate daily, keep 14 days.
+# On the SD card, not /var/log: Armbian keeps /var/log in RAM (zram), which
+# a power cut loses.
+sudo mkdir -p /var/lib/carplayd; [ -f /var/log/carplayd.events ] && sudo sh -c "cat /var/log/carplayd.events >> /var/lib/carplayd/events.log && rm /var/log/carplayd.events" || true
+printf "/var/lib/carplayd/events.log {\n\tdaily\n\trotate 14\n\tcompress\n\tdelaycompress\n\tmissingok\n\tnotifempty\n\tcopytruncate\n}\n" | sudo tee /etc/logrotate.d/carplayd >/dev/null
 rm -f /tmp/carplayd /tmp/carplayd.conf /tmp/carplayd.service
 /usr/local/sbin/carplayd -c /etc/carplayd.conf -check >/dev/null 2>&1 || sudo /usr/local/sbin/carplayd -c /etc/carplayd.conf -check | tail -3
 [ -x ~/carplay-poc/carplay-box.sh ] && (cd ~/carplay-poc && sudo ./carplay-box.sh uninstall) || true
@@ -78,7 +84,7 @@ sudo systemctl enable carplayd >/dev/null 2>&1
 sudo systemctl restart carplayd
 sleep 3
 systemctl is-active carplayd
-sudo tail -4 /var/log/carplayd.events | sed -E "s/BMW[0-9]{5}/BMW#####/g"
+sudo tail -4 /var/lib/carplayd/events.log | sed -E "s/BMW[0-9]{5}/BMW#####/g"
 sudo /usr/sbin/nft list table inet carplayd | grep -cE "reject|drop|masquerade" | sed "s/^/nft rules: /"
 curl -s localhost:9111 | grep -E "^carplayd_(serving|signal|phones|upstream)"'
 echo "deployed. rollback: $0 rollback"

@@ -58,6 +58,7 @@ type Config struct {
 	HealthFail    int           // consecutive failed checks before withdrawing
 	HealthTargets []string      // host:port to TCP-connect; default: each DNS server, port 53
 	IdleSwitch    time.Duration // serve another car once the served one has had no phone this long
+	Survey        time.Duration // lab: log each visible car's signal this often ("sighting", "signal" events); 0 = off
 	Metrics       string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
 	Cars          []Car
 }
@@ -173,6 +174,8 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 		cfg.CtrlDir = v
 	case "events":
 		cfg.EventsPath = v
+	case "survey":
+		cfg.Survey, err = time.ParseDuration(v)
 	case "idle_switch":
 		cfg.IdleSwitch, err = time.ParseDuration(v)
 	case "metrics":

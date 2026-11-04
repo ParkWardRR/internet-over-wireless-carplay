@@ -330,3 +330,16 @@ func TestRASchedulerRFC4861(t *testing.T) {
 		t.Errorf("goodbye took until %v", elapsed)
 	}
 }
+
+func TestSurveyDue(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	if surveyDue(t0, t0.Add(time.Hour), 0) {
+		t.Error("survey off must never log")
+	}
+	if surveyDue(t0, t0.Add(9*time.Second), 10*time.Second) || !surveyDue(t0, t0.Add(10*time.Second), 10*time.Second) {
+		t.Error("survey interval not respected")
+	}
+	if c := mustConfig(t, "survey = 10s\n[car A]\nssid = x\npsk = 12345678\n"); c.Survey != 10*time.Second {
+		t.Errorf("survey %v", c.Survey)
+	}
+}
