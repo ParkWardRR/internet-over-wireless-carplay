@@ -208,7 +208,7 @@ func TestNFTRuleset(t *testing.T) {
 		`iifname "wlan0" meta nfproto ipv4 drop`,
 		`iifname "wlan0" ip6 daddr { 2600:6c50:7f00:1a00::/56, fc00::/7, fe80::/10, ff00::/8 } reject`,
 		`iifname "wlan0" oifname != "eth0" reject`,
-		`oifname "eth0" ip6 saddr { fd5c:ba1e:f32:a::/64, fd5c:ba1e:f32:b::/64 } masquerade`,
+		`oifname "eth0" ip6 saddr { fd5c:ba1e:f32:a::/64, fd5c:ba1e:f32:b::/64 } counter masquerade`,
 	} {
 		if !strings.Contains(r, want) {
 			t.Errorf("ruleset lacks %q:\n%s", want, r)

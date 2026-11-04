@@ -48,7 +48,7 @@ func nftRuleset(cfg Config, block []netip.Prefix) string {
 			srcs = append(srcs, c.Prefix.String())
 		}
 		b.WriteString("\tchain postrouting {\n\t\ttype nat hook postrouting priority srcnat; policy accept;\n")
-		fmt.Fprintf(&b, "\t\toifname %q ip6 saddr { %s } masquerade\n\t}\n", up, strings.Join(srcs, ", "))
+		fmt.Fprintf(&b, "\t\toifname %q ip6 saddr { %s } counter masquerade\n\t}\n", up, strings.Join(srcs, ", "))
 	}
 	b.WriteString("}\n")
 	return b.String()
