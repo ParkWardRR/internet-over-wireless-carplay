@@ -49,14 +49,14 @@ ssid = $CAR_B_SSID
 psk = $CAR_B_PSK
 channel = 11
 priority = 1
-join = -88
-leave = -92
-rejoin = -85
+join = -80
+leave = -85
+rejoin = -77
 
 [car B]
 ssid = $CAR_A_SSID
 psk = $CAR_A_PSK
-channel = 0
+channel = 11
 join = -88
 leave = -92
 rejoin = -85
