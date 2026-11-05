@@ -1,0 +1,15 @@
+[Unit]
+Description=carrecon: passive recorder of a car's CarPlay Wi-Fi (monitor-mode adapter)
+Documentation=docs/recon-box.md
+After=network.target
+
+[Service]
+# /etc/carrecon.env: CARRECON_CARS (head-unit BSSIDs, comma-separated) and
+# CARRECON_BOX (the garage box's Wi-Fi MAC). Private: never commit it.
+EnvironmentFile=/etc/carrecon.env
+ExecStart=/usr/local/sbin/carrecon -car ${CARRECON_CARS} -box ${CARRECON_BOX} -channel 11 -dir /var/lib/carrecon -max-gb 8
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

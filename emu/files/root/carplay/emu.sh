@@ -254,6 +254,8 @@ phone() {
 		ev phone_leave "$id"
 		;;
 	rs) nsx "$ns" emuagent rs "$dev" ;;
+	# Like CarPlay itself: phone → head unit over IPv6 link-local.
+	stream) nsx "$ns" emuagent stream "[fe80::ff:fe00:$(cidx "$id")00%$dev]:9" "${3:-60000}" "${4:-10}" ;;
 	check)
 		out=$(nsx "$ns" uclient-fetch -q -T 3 -O - http://captive.apple.com/hotspot-detect.html 2>/dev/null)
 		case $out in *Success*) ev phone_internet "$id" ok ;; *) ev phone_internet "$id" fail; return 1 ;; esac
@@ -305,8 +307,27 @@ capture() {
 	esac
 }
 
+# The in-car recon box: the spare radio (hwsim5) in monitor mode in car A's
+# cabin and garage air (it hears the car, the phone and the garage box), with
+# carrecon on it. hwsim's monitor radiotap carries signal and rate like the AR9271.
+recon() {
+	case $1 in
+	start)
+		p=$(phy 5)
+		for d in "/sys/class/ieee80211/$p/device/net/"*; do [ -e "$d" ] && iw dev "${d##*/}" del; done
+		iw phy "$p" interface add mon0 type monitor && ip link set mon0 up && iw dev mon0 set channel "$(chan A)" HT20 || die "mon0"
+		setgroup 5 3
+		mkdir -p "$STATE/recon"
+		(carrecon -iface mon0 -car 02:00:00:00:01:00,02:00:00:00:02:00 -box 02:00:00:00:00:00 -dir "$STATE/recon" -rotate 20s >"$STATE/recon/stdout" 2>&1 </dev/null &)
+		sleep 1; ev recon_started ;;
+	stop) killall carrecon 2>/dev/null; sleep 2; ev recon_stopped; echo "----- recon"; cat "$STATE/recon/events.log"; echo "----- pcaps"; ls "$STATE/recon/pcap" | wc -l ;;
+	*) die "recon start|stop" ;;
+	esac
+}
+
 case ${1:-} in
 	setup) setup ;;
+	recon) recon "$2" ;;
 	upstream) upstream "$2" ;;
 	isolation) isolation "$2" ;;
 	capture) capture "$2" ;;
@@ -315,7 +336,7 @@ case ${1:-} in
 	carplayd-restart) carplayd_restart ;;
 	wpa-kill) wpa_kill ;;
 	car) car "$2" "$3" "${4:-}" ;;
-	phone) phone "$2" "$3" ;;
+	phone) shift; phone "$@" ;;
 	# Timing-critical polling (20 ms, ms timestamps) is done by the Go agent.
 	wait) shift; exec emuagent wait "$@" ;;
 	events) cat "$STATE/events" 2>/dev/null ;;

@@ -297,3 +297,51 @@ func trendLeave(s *session) (map[string]float64, error) {
 	s.after(m, "signal_back→phone_route", "car_signal", "A", "phone_route")
 	return m, nil
 }
+
+// reconScenario runs carrecon on a monitor-mode radio in car A's cabin (the
+// in-car recon box, docs/recon-box.md): it must see the phone's handshake,
+// a phone → head unit stream start and stop, the garage box's traffic, and
+// the head unit deauthing everyone when the car switches off.
+func reconScenario(s *session) (map[string]float64, error) {
+	m := map[string]float64{}
+	if err := s.must(E + " recon start"); err != nil {
+		return m, err
+	}
+	if err := up(s); err != nil {
+		return m, err
+	}
+	if err := s.must(E + " phone A stream 60000 8 && sleep 6 && " + E + " car A off && sleep 3"); err != nil {
+		return m, err
+	}
+	out, err := s.sh(E + " recon stop")
+	if err != nil {
+		return m, err
+	}
+	_, log, _ := strings.Cut(out, "----- recon\n")
+	count := func(prefix string) float64 {
+		n := 0.0
+		for _, l := range strings.Split(log, "\n") {
+			if f := strings.Fields(l); len(f) > 1 && strings.HasPrefix(strings.Join(f[1:], " "), prefix) {
+				n++
+			}
+		}
+		return n
+	}
+	m["eapol_frames"] = count("eapol")
+	m["assoc_req"] = count("assoc_req")
+	m["stream_start"] = count("stream_start phone=02:00:00:00:03:00")
+	m["stream_stop"] = count("stream_stop phone=02:00:00:00:03:00")
+	m["deauth_or_disassoc_from_hu"] = count("deauth from=02:00:00:00:01:00") + count("disassoc from=02:00:00:00:01:00")
+	m["box_seconds"] = count("sec tx=02:00:00:00:00:00(box)")
+	m["marks"] = count("mark")
+	var missing []string
+	for _, k := range []string{"eapol_frames", "assoc_req", "stream_start", "stream_stop", "deauth_or_disassoc_from_hu", "box_seconds"} {
+		if m[k] == 0 {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		return m, fmt.Errorf("carrecon missed: %s", strings.Join(missing, ", "))
+	}
+	return m, nil
+}
