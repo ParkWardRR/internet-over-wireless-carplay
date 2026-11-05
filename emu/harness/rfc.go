@@ -255,3 +255,45 @@ func raAudit(s *session) (map[string]float64, error) {
 	}
 	return m, nil
 }
+
+// trendLeave: the car drives off slowly (1 dB/s) and the link would last well
+// past -84, but with drop = 6 carplayd leaves (with a goodbye) while the
+// link is still good. Then the signal returns to the parked level and it
+// rejoins at the relaxed threshold.
+func trendLeave(s *session) (map[string]float64, error) {
+	m := map[string]float64{}
+	if err := s.must("CARPLAYD_DROP=6 " + s.boxCmd("A") + " && " + E + " car A on && " + E + " wait box-assoc 60"); err != nil {
+		return m, err
+	}
+	if err := s.must(E + " car A signal -50 && " + E + " phone A join && " + E + " wait phone-assoc A 30 && " + E + " wait phone-route A 60 && sleep 22"); err != nil {
+		return m, err
+	}
+	err := s.must(ramp("A", -50, -70, -1) + " & " + E + " wait phone-noroute A 60; wait")
+	s.pull()
+	lv, ok := s.first(0, func(e event) bool { return e.Name == "carplayd_leave" })
+	if !ok {
+		return m, fmt.Errorf("no trend leave while fading to -70 (above the -84 threshold)")
+	}
+	if len(lv.Args) < 3 || lv.Args[2] != "trend" {
+		return m, fmt.Errorf("leave was not a trend leave: %v", lv.Args)
+	}
+	if v, e := strconv.Atoi(lv.Args[1]); e == nil {
+		m["leave_signal_dbm"] = float64(v)
+	}
+	if n, ok := s.first(lv.T, func(e event) bool { return e.Name == "phone_noroute" }); ok {
+		m["trend_leave→phone_noroute"] = n.T - lv.T
+	}
+	if err != nil {
+		return m, err
+	}
+	// Still driving off (the ramp continues to -70): no rejoin, no churn.
+	if c, ok := s.first(lv.T, func(e event) bool { return e.Name == "carplayd_connected" }); ok {
+		return m, fmt.Errorf("rejoined at %.2f while the car was still driving off (left at %.2f)", c.T, lv.T)
+	}
+	// Back to the parked level: rejoin near it.
+	if err := s.must(E + " car A signal -50 && " + E + " wait phone-route A 60"); err != nil {
+		return m, err
+	}
+	s.after(m, "signal_back→phone_route", "car_signal", "A", "phone_route")
+	return m, nil
+}

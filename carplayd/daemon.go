@@ -31,6 +31,9 @@ type daemon struct {
 	lastArbScan  time.Time
 	firstSeen    map[string]time.Time
 	lastSurvey   map[string]time.Time // last sighting/signal logged per car (survey)
+	samples      []sample             // signal polls of the served car, last 25 s
+	belowTrend   time.Time
+	relaxed      map[string]int // rejoin threshold after a trend leave: near the parked level
 	huntTick     int
 	phones       int
 	evFile       *os.File
@@ -329,7 +332,12 @@ func (d *daemon) onScanResults() {
 		return
 	}
 	releaseHolds(d.cfg.Cars, d.held, seen)
-	car, e, ok := pick(d.cfg.Cars, d.held, seen)
+	for id := range d.relaxed {
+		if !d.held[id] {
+			delete(d.relaxed, id)
+		}
+	}
+	car, e, ok := pick(relaxRejoin(d.cfg.Cars, d.relaxed), d.held, seen)
 	if !ok {
 		return
 	}
@@ -401,7 +409,7 @@ func (d *daemon) startServing(car *Car) {
 		d.ev("error", "ra", err.Error())
 		return
 	}
-	d.serving, d.ra, d.below = car, ra, time.Time{}
+	d.serving, d.ra, d.below, d.belowTrend, d.samples = car, ra, time.Time{}, time.Time{}, nil
 	d.servingSince, d.lastPhone, d.phones = time.Now(), time.Time{}, 0
 	d.m.set(func(m *metrics) { m.serving, m.phones = car.ID, 0 })
 	ra.start(!d.up.ok)
@@ -448,18 +456,45 @@ func (d *daemon) poll() {
 		}
 		d.m.set(func(m *metrics) { m.signal, m.phones = sig, n })
 		if surveyDue(d.lastSurvey[d.serving.ID], now, d.cfg.Survey) {
-			d.ev("signal", d.serving.ID, strconv.Itoa(sig), "phones="+strconv.Itoa(n))
+			args := []string{d.serving.ID, strconv.Itoa(sig), "phones=" + strconv.Itoa(n)}
+			if st, err := exec.Command("iw", "dev", d.cfg.STA, "station", "dump").Output(); err == nil {
+				for _, k := range []string{"tx_bitrate", "rx_bitrate", "tx_retries", "tx_failed", "beacon_loss", "tx_bytes", "rx_bytes"} {
+					if v, ok := iwStation(string(st))[k]; ok {
+						args = append(args, k+"="+v)
+					}
+				}
+			}
+			d.ev("signal", args...)
 			d.lastSurvey[d.serving.ID] = now
 		}
 	}
-	var leave bool
+	// Leave while the link is still usable: below the absolute threshold, or
+	// (drop > 0) well below where the signal sat 5-20 s ago, i.e. driving off.
+	// A box hanging on at the edge of range makes the head unit relay the
+	// phone's traffic to it at the slowest rates, starving CarPlay itself.
+	d.samples = append(trimSamples(d.samples, now), sample{now, sig})
+	var leave, trend bool
 	d.below, leave = leaveCheck(d.below, now, sig, d.serving.Leave, d.cfg.LeaveFor)
-	if leave {
+	base, haveBase := baselineOf(d.samples, now)
+	if d.serving.Drop > 0 && haveBase {
+		d.belowTrend, trend = leaveCheck(d.belowTrend, now, sig, base-d.serving.Drop, d.cfg.LeaveFor)
+	}
+	if leave || trend {
 		car := d.serving
-		d.ev("leave", car.ID, strconv.Itoa(sig))
+		why := "threshold"
+		if !leave {
+			why = "trend base=" + strconv.Itoa(base)
+		}
+		d.ev("leave", car.ID, strconv.Itoa(sig), why)
 		d.m.inc("leaves")
 		d.stopServing(true)
 		d.held[car.ID] = true
+		if trend && !leave {
+			// Rejoin only near the parked level: the absolute rejoin threshold
+			// may be weaker than where we just left, which would mean join,
+			// leave, join while driving off. A dip while parked recovers there.
+			d.relaxed[car.ID] = max(base-3, car.Join)
+		}
 		d.cmd.ok("DISCONNECT")
 		d.cmd.ok("DISABLE_NETWORK all")
 		return

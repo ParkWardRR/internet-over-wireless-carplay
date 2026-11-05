@@ -28,7 +28,7 @@ fi
 echo "building on build-host..."
 rsync -a --delete --exclude secrets/ --exclude .git/ --exclude emu/out/ --exclude 'ios/CarNetProbe/*.xcodeproj' \
 	"$HERE/" "$BUILD:builds/carplay-deploy/"
-ssh "$BUILD" 'mkdir -p ~/builds/carplay-deploy && cd ~/builds/carplay-deploy && emu/run.sh carplayd' | tail -1
+ssh "$BUILD" 'mkdir -p ~/builds/carplay-deploy && cd ~/builds/carplay-deploy && rm -f emu/out/carplayd-arm64 && emu/run.sh carplayd > emu/out/deploy-build.log 2>&1; s=$?; tail -1 emu/out/deploy-build.log; [ $s -eq 0 ] && [ -s emu/out/carplayd-arm64 ]' || { echo "build failed on $BUILD (see ~/builds/carplay-deploy/emu/out/deploy-build.log); nothing deployed" >&2; exit 1; }
 scp -q "$BUILD:builds/carplay-deploy/emu/out/carplayd-arm64" "$TMP/carplayd"
 
 # The F32 is car B in secrets (BMW#####), the F22 car A (BMW#####); carplayd
@@ -41,7 +41,11 @@ uplink = eth0
 nat66 = nft
 firewall = nft
 events = /var/lib/carplayd/events.log
-survey = 10s
+survey = 2s
+# Leave while the link is still usable; a missed goodbye strands the phone
+# at most 12 s (3 x the 4 s max RA interval).
+leave_for = 2s
+router_lifetime = 12s
 metrics = :9111
 
 [car A]
@@ -52,14 +56,16 @@ priority = 1
 join = -80
 leave = -85
 rejoin = -77
+drop = 6
 
 [car B]
 ssid = $CAR_A_SSID
 psk = $CAR_A_PSK
 channel = 11
-join = -88
-leave = -92
-rejoin = -85
+join = -80
+leave = -85
+rejoin = -77
+drop = 6
 CONF
 
 scp -q "$TMP/carplayd" "$TMP/carplayd.conf" "$HERE/carplayd/dist/carplayd.service" "$SBC:/tmp/"

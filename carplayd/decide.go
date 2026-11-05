@@ -181,3 +181,83 @@ func preempt(servingPrio, otherPrio int, servingSince, lastPhone, now time.Time,
 func surveyDue(last, now time.Time, every time.Duration) bool {
 	return every > 0 && now.Sub(last) >= every
 }
+
+// sample is one signal poll while serving.
+type sample struct {
+	t   time.Time
+	sig int
+}
+
+// Trend window: the baseline is where the signal sat 5-20 s ago, so a car
+// driving away is compared with where it was parked, not with its own fall.
+const (
+	trendFrom = 20 * time.Second
+	trendTo   = 5 * time.Second
+	trendKeep = 25 * time.Second
+)
+
+// baselineOf is the median signal of samples between trendFrom and trendTo
+// ago; ok is false until there are at least 5 of them.
+func baselineOf(samples []sample, now time.Time) (int, bool) {
+	var v []int
+	for _, s := range samples {
+		if age := now.Sub(s.t); age >= trendTo && age <= trendFrom {
+			v = append(v, s.sig)
+		}
+	}
+	if len(v) < 5 {
+		return 0, false
+	}
+	for i := 1; i < len(v); i++ { // insertion sort: at most ~16 values
+		for j := i; j > 0 && v[j] < v[j-1]; j-- {
+			v[j], v[j-1] = v[j-1], v[j]
+		}
+	}
+	return v[len(v)/2], true
+}
+
+// trimSamples drops samples older than trendKeep.
+func trimSamples(samples []sample, now time.Time) []sample {
+	i := 0
+	for i < len(samples) && now.Sub(samples[i].t) > trendKeep {
+		i++
+	}
+	return samples[i:]
+}
+
+// iwStation pulls the counters we log from `iw dev X station dump`.
+func iwStation(out string) map[string]string {
+	m := map[string]string{}
+	for _, l := range strings.Split(out, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(l), ":")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "tx retries", "tx failed", "rx bytes", "tx bytes", "beacon loss":
+			m[strings.ReplaceAll(k, " ", "_")] = strings.TrimSpace(v)
+		case "tx bitrate", "rx bitrate":
+			if f := strings.Fields(v); len(f) > 0 {
+				m[strings.ReplaceAll(k, " ", "_")] = f[0]
+			}
+		}
+	}
+	return m
+}
+
+// relaxRejoin returns cars with the rejoin threshold replaced for cars that
+// left on a signal trend (relaxed[id] = near the level they were parked at).
+// It can be stricter than Rejoin (the car left above it) or easier (a dip while
+// parked at a weak spot).
+func relaxRejoin(cars []Car, relaxed map[string]int) []Car {
+	if len(relaxed) == 0 {
+		return cars
+	}
+	out := append([]Car(nil), cars...)
+	for i := range out {
+		if v, ok := relaxed[out[i].ID]; ok {
+			out[i].Rejoin = v
+		}
+	}
+	return out
+}

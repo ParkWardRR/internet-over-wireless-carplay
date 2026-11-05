@@ -148,6 +148,7 @@ EOF
 		for id in "$@"; do
 			echo "[car $id]"; echo "ssid = $(ssid "$id")"; echo "psk = $(psk "$id")"; echo "channel = $(chan "$id")"
 			[ "$id" = A ] && echo "priority = 1"
+			[ -n "${CARPLAYD_DROP:-}" ] && echo "drop = $CARPLAYD_DROP"
 		done
 	} > /etc/carplayd.conf
 	carplayd -c /etc/carplayd.conf -check >/dev/null || die "carplayd config invalid"
