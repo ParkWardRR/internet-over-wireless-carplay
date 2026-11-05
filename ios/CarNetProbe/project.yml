@@ -19,6 +19,8 @@ targets:
         NSLocalNetworkUsageDescription: Finds the head unit and the garage box on the CarPlay Wi-Fi.
         NSBonjourServices: [_carplay-ctrl._tcp, _airplay._tcp, _raop._tcp]
         NSLocationWhenInUseUsageDescription: iOS only shows the Wi-Fi network name and signal to apps with location access.
+        NSLocationAlwaysAndWhenInUseUsageDescription: Drive mode logs where the garage internet ends and cellular starts, and keeps logging with the phone locked.
+        UIBackgroundModes: [location]
     # SSID/BSSID/signal need Access Wi-Fi Information, which needs an explicit
     # App ID (the team's wildcard profile can't carry it). To turn it on:
     #   entitlements:

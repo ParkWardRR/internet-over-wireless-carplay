@@ -30,8 +30,14 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Finds the head unit and the garage box on the CarPlay Wi-Fi.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Drive mode logs where the garage internet ends and cellular starts, and keeps logging with the phone locked.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>iOS only shows the Wi-Fi network name and signal to apps with location access.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>
