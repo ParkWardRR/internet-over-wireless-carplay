@@ -22,6 +22,7 @@ type Car struct {
 	Leave    int          // dBm: leave when weaker than this for LeaveFor
 	Rejoin   int          // dBm: after leaving, rejoin only at least this strong
 	Priority int          // higher wins when both cars are seen
+	Drop     int          // dB: also leave when the signal falls this far below where it sat 5-20 s ago (0 = off)
 }
 
 // Freq returns the 2.4 GHz centre frequency in MHz, or 0 when the channel is
@@ -278,6 +279,8 @@ func setCar(c *Car, k, v string) error {
 		c.Rejoin = atoi(v)
 	case "priority":
 		c.Priority = atoi(v)
+	case "drop":
+		c.Drop = atoi(v)
 	default:
 		return fmt.Errorf("unknown car key %q", k)
 	}

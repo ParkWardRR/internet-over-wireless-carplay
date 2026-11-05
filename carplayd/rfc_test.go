@@ -343,3 +343,66 @@ func TestSurveyDue(t *testing.T) {
 		t.Errorf("survey %v", c.Survey)
 	}
 }
+
+// The F32's real departure (2026-11-04): parked around -75, then falling. With
+// drop = 6 the trend leave fires while the link is still usable, where the
+// absolute -85 threshold never did (the link died at -84).
+func TestTrendLeaveOnDeparture(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	sigs := []int{-75, -75, -74, -73, -73, -74, -75, -74, -73, -75, -74, -73, -74, -75, -74, -73, -75, -74, -76, -78, -80, -81, -82, -83, -84}
+	var s []sample
+	var below time.Time
+	left := -1
+	for i, v := range sigs {
+		now := t0.Add(time.Duration(i) * time.Second)
+		s = append(trimSamples(s, now), sample{now, v})
+		base, ok := baselineOf(s, now)
+		if !ok {
+			continue
+		}
+		var leave bool
+		if below, leave = leaveCheck(below, now, v, base-6, 2*time.Second); leave {
+			left = i
+			break
+		}
+	}
+	if left < 0 || sigs[left] < -84 {
+		t.Fatalf("trend leave at index %d", left)
+	}
+	if sigs[left] > -80 {
+		t.Errorf("left too early at %d dBm", sigs[left])
+	}
+}
+
+// A brief dip while parked (2 polls, under leave_for = 2 s) must not leave.
+func TestTrendIgnoresBriefDip(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	var s []sample
+	var below time.Time
+	for i := 0; i < 40; i++ {
+		v := -75
+		if i == 25 || i == 26 {
+			v = -84
+		}
+		now := t0.Add(time.Duration(i) * time.Second)
+		s = append(trimSamples(s, now), sample{now, v})
+		if base, ok := baselineOf(s, now); ok {
+			var leave bool
+			if below, leave = leaveCheck(below, now, v, base-6, 2*time.Second); leave {
+				t.Fatalf("left on a 2 s dip at poll %d", i)
+			}
+		}
+	}
+}
+
+func TestRelaxRejoinAndStation(t *testing.T) {
+	cars := []Car{{ID: "A", Rejoin: -77}, {ID: "B", Rejoin: -77}}
+	r := relaxRejoin(cars, map[string]int{"A": -53})
+	if r[0].Rejoin != -53 || r[1].Rejoin != -77 || cars[0].Rejoin != -77 {
+		t.Errorf("relaxRejoin %+v (orig %+v)", r, cars)
+	}
+	st := iwStation("Station bc:30:7e:00:00:01 (on wlan0)\n\tinactive time:\t20 ms\n\trx bytes:\t123\n\ttx retries:\t7\n\ttx failed:\t1\n\ttx bitrate:\t1.0 MBit/s\n")
+	if st["tx_retries"] != "7" || st["tx_failed"] != "1" || st["tx_bitrate"] != "1.0" || st["rx_bytes"] != "123" {
+		t.Errorf("station %v", st)
+	}
+}

@@ -161,6 +161,7 @@ var scenarios = []scenario{
 	{"isolation", "phone on the car Wi-Fi: internet reachable; box, home LAN, other car not", "carplayd", isolation},
 	{"isolation-control", "same with the firewall off: the probe must see leaks", "carplayd", isolationControl},
 	{"ra-audit", "capture on the box: RFC 4861 RA timing, unicast RS answers, complete withdrawals", "carplayd", raAudit},
+	{"trend-leave", "car drives off slowly (1 dB/s): drop = 6 leaves with a goodbye long before -84, then rejoins when it comes back", "carplayd", trendLeave},
 }
 
 func up(s *session, cars ...string) error {
