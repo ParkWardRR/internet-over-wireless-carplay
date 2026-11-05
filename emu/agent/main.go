@@ -159,6 +159,26 @@ func main() {
 			os.Exit(1)
 		}
 		ev("rs_sent", os.Args[2])
+	case "stream":
+		// emuagent stream <ip:port> <bytes/s> <seconds>: UDP at a steady rate,
+		// standing in for the CarPlay video/audio stream phone → head unit.
+		if len(os.Args) != 5 {
+			os.Exit(2)
+		}
+		rate, _ := strconv.Atoi(os.Args[3])
+		secs, _ := strconv.ParseFloat(os.Args[4], 64)
+		c, err := net.Dial("udp", os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		pkt := make([]byte, 1200)
+		per := time.Second * time.Duration(len(pkt)) / time.Duration(max(rate, 1))
+		ev("stream_begin", os.Args[2], os.Args[3])
+		for end := time.Now().Add(time.Duration(secs * float64(time.Second))); time.Now().Before(end); time.Sleep(per) {
+			c.Write(pkt)
+		}
+		ev("stream_end", os.Args[2])
 	case "tcp":
 		// emuagent tcp <name> <[addr]:port>: can this namespace open a TCP
 		// connection there? Prints "EV <t> reach <name> open|blocked <addr>".
