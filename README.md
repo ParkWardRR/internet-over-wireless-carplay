@@ -1,6 +1,39 @@
-# bmw-f32-carplay-wan
+# internet-over-wireless-carplay
 
-Give the iPhone internet while it's on **wireless CarPlay** in the basement garage, where there's no LTE/GSM.
+Your car's wireless CarPlay creates its own private Wi-Fi network so your phone can talk to the dashboard. That network has no internet — it's just a direct link between phone and car. Normally your phone falls back to cellular for everything else, but in a basement or underground garage there is no cellular signal. Maps stops loading, search stops working, and you are stuck.
+
+This project fixes that. A small Linux box — a Raspberry Pi, Banana Pi, or similar — joins the car's CarPlay Wi-Fi as a second device and bridges it to your home internet through a wired Ethernet connection. Your phone sees a working internet connection right on the CarPlay network and offers a **Use For Internet** toggle. Turn it on, and Google Maps search and routing work underground. Nothing about the car changes. Nothing about the phone's IP settings changes.
+
+**Use case:** a basement garage with Ethernet and power but zero LTE/GSM coverage. The box sits near the car, plugged into the garage network. When you park and CarPlay connects, the box does the rest automatically.
+
+## Quick start
+
+1. **Get the CarPlay Wi-Fi password.** On iOS 27: Settings → Wi-Fi → Edit → Known Networks → the car's network → Password. Copy it.
+
+2. **Set up a Linux box** (Raspberry Pi, Banana Pi, or any small Linux machine) with a wired Ethernet connection to your home network and a Wi-Fi adapter.
+
+3. **Store the password** in `secrets/carplay.env` (copy `secrets.example.env` as a template):
+
+   ```
+   CAR_SSID='BMW12345 CarPlay'
+   CAR_PSK='your-password-here'
+   ```
+
+4. **Run the setup script** on the box:
+
+   ```sh
+   sudo scripts/carplay-box.sh install
+   ```
+
+   This makes the box join the car's Wi-Fi whenever it appears and share the home internet connection automatically.
+
+5. **In the car**, connect your phone to wireless CarPlay as usual. Go to Settings → Wi-Fi → the CarPlay network → tap **Check For Internet Access** → turn on **Use For Internet**.
+
+6. **Open Google Maps on CarPlay.** Search and routing now work, even with no cell signal.
+
+For a one-off test instead of a permanent install, see `scripts/poc-linux.sh`.
+
+---
 
 ## Result: it works (2026-11-02)
 
