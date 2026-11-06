@@ -1,5 +1,16 @@
 # internet-over-wireless-carplay
 
+[![Release](https://img.shields.io/github/v/release/ParkWardRR/internet-over-wireless-carplay?label=release&color=blue)](https://github.com/ParkWardRR/internet-over-wireless-carplay/releases)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://www.kernel.org/)
+[![OpenWrt](https://img.shields.io/badge/OpenWrt-00B5E2?logo=openwrt&logoColor=white)](https://openwrt.org/)
+[![iOS](https://img.shields.io/badge/iOS-27%2B-000000?logo=apple&logoColor=white)](https://developer.apple.com/ios/)
+[![BMW](https://img.shields.io/badge/BMW-NBT%20EVO-1C69D4?logo=bmw&logoColor=white)](https://www.bmw.com/)
+[![CarPlay](https://img.shields.io/badge/CarPlay-wireless-000000?logo=appleplay&logoColor=white)](https://www.apple.com/ios/carplay/)
+[![Status](https://img.shields.io/badge/status-proof%20of%20concept-orange)](https://github.com/ParkWardRR/internet-over-wireless-carplay/blob/main/docs/status.md)
+[![Wi-Fi](https://img.shields.io/badge/Wi--Fi-802.11n%202.4%20GHz-blue)](https://en.wikipedia.org/wiki/IEEE_802.11n)
+[![IPv6](https://img.shields.io/badge/IPv6-RA%20%2B%20NAT66-2EA82E)](https://en.wikipedia.org/wiki/IPv6)
+
 Your car's wireless CarPlay creates its own private Wi-Fi network so your phone can talk to the dashboard. That network has no internet — it's just a direct link between phone and car. Normally your phone falls back to cellular for everything else, but in a basement or underground garage there is no cellular signal. Maps stops loading, search stops working, and you are stuck.
 
 This project fixes that. A small Linux box — a Raspberry Pi, Banana Pi, or similar — joins the car's CarPlay Wi-Fi as a second device and bridges it to your home internet through a wired Ethernet connection. Your phone sees a working internet connection right on the CarPlay network and offers a **Use For Internet** toggle. Turn it on, and Google Maps search and routing work underground. Nothing about the car changes. Nothing about the phone's IP settings changes.
