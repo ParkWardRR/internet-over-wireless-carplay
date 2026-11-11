@@ -45,16 +45,46 @@ type daemon struct {
 }
 
 // ev prints "EV <boottime> carplayd_<name> ..." (the harness's format) and
-// appends it to the events file.
+// appends it to the events file, each line prefixed with the wall clock.
+//
+// The boottime alone cannot be lined up against the in-car recorder, which
+// stamps wall clock (docs/recon-box.md): correlating the two meant knowing the
+// box's boot instant. Both now carry the same RFC 3339 field.
 func (d *daemon) ev(name string, args ...string) {
 	d.evMu.Lock()
 	defer d.evMu.Unlock()
-	l := fmt.Sprintf("EV %.3f carplayd_%s %s", boottime(), name, strings.Join(args, " "))
+	l := fmt.Sprintf("%s EV %.3f carplayd_%s %s",
+		time.Now().Format("2006-01-02T15:04:05.000Z07:00"), boottime(), name, strings.Join(args, " "))
 	l = strings.TrimSpace(l)
 	fmt.Println(l)
 	if d.evFile != nil {
 		d.evFile.WriteString(l + "\n")
 	}
+}
+
+// dbg logs only with `debug = on`: the high-volume per-tick detail.
+func (d *daemon) dbg(name string, args ...string) {
+	if !d.cfg.Debug {
+		return
+	}
+	d.ev("dbg_"+name, args...)
+}
+
+// logWPA records every control event wpa_supplicant sends. Only four prefixes
+// drive carplayd's state machine and the rest used to be dropped silently,
+// which hid exactly the ones a failed departure turns on: ASSOC-REJECT and
+// AUTH-REJECT with their status codes, BEACON-LOSS, and the roam/auth timeouts.
+// The two that fire every hunt tick stay behind `debug`.
+func (d *daemon) logWPA(e string) {
+	e = strings.TrimSpace(e)
+	if e == "" {
+		return
+	}
+	if strings.HasPrefix(e, "CTRL-EVENT-SCAN-RESULTS") || strings.HasPrefix(e, "CTRL-EVENT-SCAN-STARTED") {
+		d.dbg("wpa", e)
+		return
+	}
+	d.ev("wpa", e)
 }
 
 func run(name string, args ...string) error {
@@ -310,6 +340,16 @@ func (d *daemon) onScanResults() {
 	}
 	seen := parseScanResults(r)
 	now := time.Now()
+	// Every BSS in the scan, not just the configured cars: a car that is on
+	// but unseen, or on a channel we do not hunt, looks identical to a car
+	// that is off unless the whole scan is on record.
+	if d.cfg.Debug {
+		args := []string{"n=" + strconv.Itoa(len(seen))}
+		for _, e := range seen {
+			args = append(args, fmt.Sprintf("%s/%d/%d/%q", e.BSSID, e.Freq, e.Signal, e.SSID))
+		}
+		d.dbg("scan", args...)
+	}
 	for _, c := range d.cfg.Cars {
 		if e, found := best(c, seen); found {
 			if _, ok := d.firstSeen[c.ID]; !ok {
@@ -458,15 +498,18 @@ func (d *daemon) poll() {
 		if surveyDue(d.lastSurvey[d.serving.ID], now, d.cfg.Survey) {
 			args := []string{d.serving.ID, strconv.Itoa(sig), "phones=" + strconv.Itoa(n)}
 			if st, err := exec.Command("iw", "dev", d.cfg.STA, "station", "dump").Output(); err == nil {
-				for _, k := range []string{"tx_bitrate", "rx_bitrate", "tx_retries", "tx_failed", "beacon_loss", "tx_bytes", "rx_bytes"} {
-					if v, ok := iwStation(string(st))[k]; ok {
+				link := iwStation(string(st))
+				for _, k := range linkFields {
+					if v, ok := link[k]; ok {
 						args = append(args, k+"="+v)
 					}
 				}
+				d.dbg("station", strings.Fields(strings.ReplaceAll(string(st), "\n", " "))...)
 			}
 			d.ev("signal", args...)
 			d.lastSurvey[d.serving.ID] = now
 		}
+		d.dbg("neigh", d.serving.ID, strings.Join(strings.Fields(strings.ReplaceAll(string(out), "\n", " | ")), " "))
 	}
 	// Leave while the link is still usable: below the absolute threshold, or
 	// (drop > 0) well below where the signal sat 5-20 s ago, i.e. driving off.
@@ -479,6 +522,22 @@ func (d *daemon) poll() {
 	if d.serving.Drop > 0 && haveBase {
 		d.belowTrend, trend = leaveCheck(d.belowTrend, now, sig, base-d.serving.Drop, d.cfg.LeaveFor)
 	}
+	// The whole leave decision, every poll: which threshold is in play, how
+	// long the signal has sat under it, and what the trend baseline makes of
+	// it. A departure that the box got wrong is otherwise only visible as the
+	// single leave line that did or did not happen.
+	trace := []string{d.serving.ID, strconv.Itoa(sig),
+		"leave=" + strconv.Itoa(d.serving.Leave), "below_for=" + since(d.below, now),
+		"drop=" + strconv.Itoa(d.serving.Drop), "samples=" + strconv.Itoa(len(d.samples))}
+	if haveBase {
+		trace = append(trace, "base="+strconv.Itoa(base),
+			"trend_leave="+strconv.Itoa(base-d.serving.Drop), "trend_below_for="+since(d.belowTrend, now))
+	} else {
+		trace = append(trace, "base=none")
+	}
+	trace = append(trace, "leave_for="+d.cfg.LeaveFor.String(),
+		fmt.Sprintf("fire_threshold=%t fire_trend=%t", leave, trend))
+	d.dbg("decide", trace...)
 	if leave || trend {
 		car := d.serving
 		why := "threshold"
@@ -533,16 +592,24 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 				d.restartWPA("event socket closed")
 				continue
 			}
+			d.logWPA(e)
 			switch {
 			case strings.HasPrefix(e, "CTRL-EVENT-SCAN-RESULTS"):
 				d.onScanResults()
 			case strings.HasPrefix(e, "CTRL-EVENT-CONNECTED"):
 				d.onConnected()
 			case strings.HasPrefix(e, "CTRL-EVENT-DISCONNECTED"):
+				// reason= and locally_generated= say whether the head unit
+				// kicked us or we walked away, which the event alone never did.
+				kv := parseEventArgs(e)
+				why := []string{"reason=" + kv["reason"], "why=" + reasonName(kv["reason"]),
+					"locally_generated=" + orZero(kv["locally_generated"]), "bssid=" + kv["bssid"]}
 				if d.serving != nil {
-					d.ev("link_lost", d.serving.ID)
+					d.ev("link_lost", append([]string{d.serving.ID, strconv.Itoa(d.lastSig)}, why...)...)
 					d.m.inc("link_lost")
 					d.stopServing(false)
+				} else {
+					d.ev("disconnected_idle", why...)
 				}
 				d.cmd.ok("DISABLE_NETWORK all") // carplayd decides what to join next
 			case strings.HasPrefix(e, "CTRL-EVENT-TERMINATING"):

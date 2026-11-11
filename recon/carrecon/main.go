@@ -35,13 +35,14 @@ type recon struct {
 	dir    string
 	cars   map[string]bool // head-unit BSSIDs
 	box    string          // the garage box's STA MAC
-	mu     sync.Mutex
-	ev     *os.File
-	sec    time.Time
-	stats  map[string]*stat // per transmitter in a car BSS, this second
-	stream map[string]bool  // phone→HU streams seen flowing (key "phone>hu")
-	quiet  map[string]int   // seconds without stream bytes
-	marks  []time.Time
+	mu      sync.Mutex
+	ev      *os.File
+	sec     time.Time
+	stats   map[string]*stat // per transmitter in a car BSS, this second
+	beacons map[string]*stat // per car BSSID: beacons this second (RSSI track)
+	stream  map[string]bool  // phone→HU streams seen flowing (key "phone>hu")
+	quiet   map[string]int   // seconds without stream bytes
+	marks   []time.Time
 }
 
 type stat struct {
@@ -103,7 +104,29 @@ func (r *recon) handle(t time.Time, f frame) {
 		r.flush(r.sec)
 		r.sec = t.Truncate(time.Second)
 	}
-	if f.ftype != 2 && !(f.ftype == 0 && f.subtype != 8) { // beacons and control frames: not in the stats
+	// Beacons: an RSSI track of the head unit itself, 10/s, independent of any
+	// traffic. On a departure drive this is the only signal a car gives once
+	// its link goes idle, so it is what plots range against where the car is.
+	if f.ftype == 0 && f.subtype == 8 {
+		if r.beacons == nil {
+			r.beacons = map[string]*stat{}
+		}
+		s := r.beacons[bss]
+		if s == nil {
+			s = &stat{to: map[string]int{}}
+			r.beacons[bss] = s
+		}
+		s.frames++
+		if f.retry {
+			s.retries++
+		}
+		if f.signal != 0 {
+			s.sigSum += f.signal
+			s.sigN++
+		}
+		return
+	}
+	if f.ftype != 2 && !(f.ftype == 0 && f.subtype != 8) { // control frames: not in the stats
 		return
 	}
 	s := r.stats[f.a2]
@@ -131,9 +154,23 @@ const streamMin = 20000 // bytes/s
 // tracks the phone → head unit stream.
 func (r *recon) flush(sec time.Time) {
 	if sec.IsZero() {
-		r.stats = map[string]*stat{}
+		r.stats, r.beacons = map[string]*stat{}, map[string]*stat{}
 		return
 	}
+	bkeys := make([]string, 0, len(r.beacons))
+	for k := range r.beacons {
+		bkeys = append(bkeys, k)
+	}
+	sort.Strings(bkeys)
+	for _, k := range bkeys {
+		s := r.beacons[k]
+		sig := 0
+		if s.sigN > 0 {
+			sig = s.sigSum / s.sigN
+		}
+		r.event("beacon", "hu="+k, fmt.Sprintf("count=%d sig=%d retries=%d", s.frames, sig, s.retries))
+	}
+	r.beacons = map[string]*stat{}
 	keys := make([]string, 0, len(r.stats))
 	for k := range r.stats {
 		keys = append(keys, k)
@@ -303,6 +340,65 @@ func (r *recon) prune(capDir string, maxBytes int64, keepAround time.Duration) {
 	}
 }
 
+// ring runs the pcap ring and restarts it whenever it exits, until stop.
+//
+// -Z root matters: tcpdump otherwise drops privileges to user "tcpdump" after
+// opening the first file, and then cannot create the next rotation file in the
+// 0700 output directory. The ring died one rotation in ("Permission denied")
+// while the live parser, which only writes to a pipe, kept running — so the
+// events log looked healthy with no capture behind it.
+func (r *recon) ring(dev, capDir string, rotate time.Duration, stop <-chan struct{}) {
+	for {
+		cmd := exec.Command("tcpdump", "-i", dev, "-n", "-q", "-U", "-Z", "root",
+			"-G", fmt.Sprint(int(rotate.Seconds())),
+			"-w", filepath.Join(capDir, "%Y%m%d-%H%M%S.pcap"))
+		var errb strings.Builder
+		cmd.Stderr = &errb
+		if err := cmd.Start(); err != nil {
+			r.event("error", "tcpdump ring", err.Error())
+		} else {
+			r.event("ring_start", "dev="+dev, fmt.Sprintf("pid=%d rotate=%s", cmd.Process.Pid, rotate))
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			select {
+			case <-stop:
+				cmd.Process.Signal(syscall.SIGTERM)
+				cmd.Wait() // reap
+				return
+			case err := <-done:
+				r.event("ring_died", fmt.Sprint(err), strings.TrimSpace(errb.String()))
+			}
+		}
+		select {
+		case <-stop:
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// ringStatus reports what the ring has on disk, so a drive can be confirmed
+// to be recording without opening the capture directory.
+func (r *recon) ringStatus(capDir string) {
+	files, _ := filepath.Glob(filepath.Join(capDir, "*.pcap"))
+	var total int64
+	newest := ""
+	for _, f := range files {
+		st, err := os.Stat(f)
+		if err != nil {
+			continue
+		}
+		total += st.Size()
+		if b := filepath.Base(f); newest == "" || b > newest { // names are timestamps
+			newest = b
+		}
+	}
+	r.mu.Lock()
+	marks := len(r.marks)
+	r.mu.Unlock()
+	r.event("ring_status", fmt.Sprintf("files=%d bytes=%d marks=%d", len(files), total, marks), "newest="+newest)
+}
+
 func main() {
 	carList := flag.String("car", "", "head-unit BSSIDs, comma-separated (from secrets)")
 	box := flag.String("box", "", "the garage box's Wi-Fi MAC")
@@ -314,7 +410,7 @@ func main() {
 	rotate := flag.Duration("rotate", time.Minute, "pcap file length")
 	flag.Parse()
 
-	r := &recon{dir: *dir, cars: map[string]bool{}, box: strings.ToLower(*box), stats: map[string]*stat{}, stream: map[string]bool{}, quiet: map[string]int{}}
+	r := &recon{dir: *dir, cars: map[string]bool{}, box: strings.ToLower(*box), stats: map[string]*stat{}, beacons: map[string]*stat{}, stream: map[string]bool{}, quiet: map[string]int{}}
 	for _, c := range strings.Split(strings.ToLower(*carList), ",") {
 		if c = strings.TrimSpace(c); c != "" {
 			r.cars[c] = true
@@ -341,6 +437,7 @@ func main() {
 	go func() {
 		for range time.Tick(30 * time.Second) {
 			r.prune(capDir, int64(*maxGB*(1<<30)), 2*time.Minute)
+			r.ringStatus(capDir)
 		}
 	}()
 
@@ -365,14 +462,12 @@ func main() {
 			dev, lastErr = "mon0", ""
 			r.event("monitor", "phy="+phy, "dev=mon0")
 		}
-		// One tcpdump writes the ring, another streams to the parser.
-		ring := exec.Command("tcpdump", "-i", dev, "-n", "-q", "-U", "-G", fmt.Sprint(int(rotate.Seconds())),
-			"-w", filepath.Join(capDir, "%Y%m%d-%H%M%S.pcap"))
+		// One tcpdump writes the ring (supervised, full frames, for offline
+		// decryption), another streams truncated frames to the live parser.
+		ringStop := make(chan struct{})
+		go r.ring(dev, capDir, *rotate, ringStop)
 		live := exec.Command("tcpdump", "-i", dev, "-n", "-q", "-U", "-s", "256", "-w", "-")
 		out, _ := live.StdoutPipe()
-		if err := ring.Start(); err != nil {
-			r.event("error", "tcpdump ring", err.Error())
-		}
 		if err := live.Start(); err != nil {
 			r.event("error", "tcpdump live", err.Error())
 		}
@@ -380,18 +475,17 @@ func main() {
 		go func() { done <- r.readPcap(out) }()
 		select {
 		case <-stop:
-			ring.Process.Signal(syscall.SIGTERM)
+			close(ringStop)
 			live.Process.Signal(syscall.SIGTERM)
-			ring.Wait()
 			live.Wait()
 			r.flush(r.sec)
+			r.ringStatus(capDir)
 			r.event("stop")
 			return
 		case err := <-done:
 			r.event("capture_lost", fmt.Sprint(err))
-			ring.Process.Signal(syscall.SIGTERM)
+			close(ringStop)
 			live.Process.Kill()
-			ring.Wait()
 			live.Wait()
 			time.Sleep(2 * time.Second)
 		}

@@ -225,24 +225,122 @@ func trimSamples(samples []sample, now time.Time) []sample {
 	return samples[i:]
 }
 
+// since renders how long ago t was, or "-" when it is unset (not below any
+// threshold right now).
+func since(t, now time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return now.Sub(t).Truncate(100 * time.Millisecond).String()
+}
+
+// parseEventArgs pulls the "key=value" arguments out of a wpa_supplicant
+// control event line, e.g.
+//
+//	CTRL-EVENT-DISCONNECTED bssid=xx:xx:xx:xx:xx:xx reason=3 locally_generated=1
+func parseEventArgs(e string) map[string]string {
+	m := map[string]string{}
+	for _, f := range strings.Fields(e) {
+		if k, v, ok := strings.Cut(f, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+func orZero(s string) string {
+	if s == "" {
+		return "0"
+	}
+	return s
+}
+
+// reasonName names an IEEE 802.11 reason code (802.11-2020 table 9-49), so a
+// departure's log says what happened without a standards lookup. The codes
+// this investigation expects: 3 (the sender is leaving), 4 (inactivity, i.e.
+// the AP gave up on us), 15 (4-way handshake timeout, out of range mid-rekey).
+func reasonName(code string) string {
+	switch code {
+	case "":
+		return "unknown"
+	case "1":
+		return "unspecified"
+	case "2":
+		return "prev_auth_invalid"
+	case "3":
+		return "sta_leaving"
+	case "4":
+		return "inactivity"
+	case "5":
+		return "ap_busy"
+	case "6":
+		return "class2_from_nonauth"
+	case "7":
+		return "class3_from_nonassoc"
+	case "8":
+		return "sta_left_bss"
+	case "9":
+		return "assoc_without_auth"
+	case "14":
+		return "mic_failure"
+	case "15":
+		return "4way_handshake_timeout"
+	case "16":
+		return "group_key_timeout"
+	case "17":
+		return "ie_mismatch"
+	case "23":
+		return "ieee8021x_auth_failed"
+	case "34":
+		return "poor_rssi_or_low_ack"
+	}
+	return "code" + code
+}
+
 // iwStation pulls the counters we log from `iw dev X station dump`.
+//
+// Values that carry a unit or a per-chain list ("-70 [-70] dBm", "39.0 MBit/s",
+// "12 seconds") keep only their first field; plain counts are taken whole.
 func iwStation(out string) map[string]string {
+	whole := map[string]bool{
+		"tx retries": true, "tx failed": true, "rx bytes": true, "tx bytes": true,
+		"rx packets": true, "tx packets": true, "beacon loss": true, "beacon rx": true,
+		"rx drop misc": true, "authorized": true, "tx retried": true,
+	}
+	first := map[string]bool{
+		"tx bitrate": true, "rx bitrate": true, "signal": true, "signal avg": true,
+		"beacon signal avg": true, "expected throughput": true,
+		"connected time": true, "inactive time": true,
+		"rx duration": true, "tx duration": true,
+	}
 	m := map[string]string{}
 	for _, l := range strings.Split(out, "\n") {
 		k, v, ok := strings.Cut(strings.TrimSpace(l), ":")
 		if !ok {
 			continue
 		}
-		switch k {
-		case "tx retries", "tx failed", "rx bytes", "tx bytes", "beacon loss":
-			m[strings.ReplaceAll(k, " ", "_")] = strings.TrimSpace(v)
-		case "tx bitrate", "rx bitrate":
+		key := strings.ReplaceAll(k, " ", "_")
+		switch {
+		case whole[k]:
+			m[key] = strings.TrimSpace(v)
+		case first[k]:
 			if f := strings.Fields(v); len(f) > 0 {
-				m[strings.ReplaceAll(k, " ", "_")] = f[0]
+				m[key] = f[0]
 			}
 		}
 	}
 	return m
+}
+
+// linkFields is what the `signal` event reports from the station dump, in the
+// order it reads best: rates, then how the radio sees the AP, then the error
+// and volume counters, then how long the link has been up and idle.
+var linkFields = []string{
+	"tx_bitrate", "rx_bitrate",
+	"signal", "signal_avg", "beacon_signal_avg", "beacon_rx", "beacon_loss",
+	"tx_retries", "tx_failed", "rx_drop_misc",
+	"tx_packets", "rx_packets", "tx_bytes", "rx_bytes",
+	"expected_throughput", "connected_time", "inactive_time",
 }
 
 // relaxRejoin returns cars with the rejoin threshold replaced for cars that

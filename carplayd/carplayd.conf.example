@@ -56,6 +56,12 @@ dns = 2001:4860:4860::8888, 2606:4700:4700::1111
 # hunting, signal while serving) and "gone" when it disappears; 0 = off
 #survey = 10s
 #metrics = 127.0.0.1:9101
+# debug: for a drive assessment. Every event line already carries the wall
+# clock, and every wpa_supplicant control event is logged either way; this adds
+# the per-tick detail — the full scan (not just the configured cars), the raw
+# station dump, the neighbour table, and the leave decision with its
+# thresholds and trend baseline. Roughly 4 MB/hour while serving.
+#debug = off
 
 [car A]
 ssid = BMW00001 CarPlay
