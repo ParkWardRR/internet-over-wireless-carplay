@@ -16,6 +16,7 @@ type frame struct {
 	signal         int    // dBm, 0 = unknown
 	rateKbps       int    // legacy rate, 0 = unknown (HT frames)
 	eapol          bool   // unencrypted EAPOL (WPA handshake)
+	eapolMsg       int    // which of the 4-way handshake's messages (1-4), 0 = not an EAPOL-Key
 	reason         int    // deauth/disassoc reason code
 }
 
@@ -120,6 +121,25 @@ func parseFrame(b []byte, origLen int) (frame, bool) {
 		}
 		if len(w) >= h+8 && w[h] == 0xaa && w[h+1] == 0xaa && w[h+6] == 0x88 && w[h+7] == 0x8e {
 			f.eapol = true
+			// SNAP is 8 bytes, then the 802.1X header (version, type, length);
+			// for type 3 (EAPOL-Key) the descriptor type and the 16-bit Key
+			// Information follow. Which message this is decides whether the
+			// capture can be decrypted at all: Wireshark needs all four.
+			if len(w) >= h+15 && w[h+9] == 3 {
+				ki := binary.BigEndian.Uint16(w[h+13:])
+				install, ack := ki&(1<<6) != 0, ki&(1<<7) != 0
+				mic, secure := ki&(1<<8) != 0, ki&(1<<9) != 0
+				switch {
+				case !mic:
+					f.eapolMsg = 1
+				case !secure:
+					f.eapolMsg = 2
+				case ack || install:
+					f.eapolMsg = 3
+				default:
+					f.eapolMsg = 4
+				}
+			}
 		}
 	}
 	return f, true
