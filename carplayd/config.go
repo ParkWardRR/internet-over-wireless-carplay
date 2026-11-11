@@ -61,6 +61,7 @@ type Config struct {
 	IdleSwitch    time.Duration // serve another car once the served one has had no phone this long
 	Survey        time.Duration // lab: log each visible car's signal this often ("sighting", "signal" events); 0 = off
 	Metrics       string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
+	Debug         bool          // log every wpa event, full scan results, all link counters and the leave decision each poll
 	Cars          []Car
 }
 
@@ -181,6 +182,11 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 		cfg.IdleSwitch, err = time.ParseDuration(v)
 	case "metrics":
 		cfg.Metrics = v
+	case "debug":
+		if v != "on" && v != "off" {
+			return fmt.Errorf("debug must be on or off")
+		}
+		cfg.Debug = v == "on"
 	case "uplink":
 		cfg.Uplink = v
 	case "nat66":
