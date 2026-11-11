@@ -57,6 +57,12 @@ func parseEV(out string) []event {
 	sc := bufio.NewScanner(strings.NewReader(out))
 	for sc.Scan() {
 		f := strings.Fields(sc.Text())
+		// carplayd prefixes every line with the wall clock, so its events can
+		// be lined up against the in-car recorder; emu.sh and emuagent print a
+		// bare "EV <boottime> ...". Accept either.
+		if len(f) > 1 && f[0] != "EV" && f[1] == "EV" {
+			f = f[1:]
+		}
 		if len(f) >= 3 && f[0] == "EV" {
 			if t, err := strconv.ParseFloat(f[1], 64); err == nil {
 				evs = append(evs, event{T: t, Name: f[2], Args: f[3:]})
