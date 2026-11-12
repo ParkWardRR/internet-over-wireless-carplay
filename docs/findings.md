@@ -133,6 +133,51 @@ CarPlay share one BSS and one AP radio, not merely one channel. The head unit
 advertises **no BSS Load element**, so there is no channel-utilisation figure to
 read; airtime has to be computed from the capture.
 
+### The phone has to be told to use it, every time the car restarts
+
+This is the most important thing to know about running this box, and it was
+invisible for a week. On the 2026-11-11 trip the owner had **no Wi-Fi icon on
+CarPlay and neither Apple nor Google Maps would load**, while every log on the
+box said success: joined the car 2 s after it switched on, RAs every 3–4 s with
+no gap over 4 s against a 12 s lifetime, phone on the prefix, upstream healthy.
+
+Decrypting the in-car capture of those two minutes settles it. The phone did use
+the box — 1.36 MB through it — and here is everything it reached:
+
+| Service | What it is |
+|---|---|
+| `courier.push.apple.com` | APNS |
+| `dns.google` | iOS probing the resolver in our RA |
+| `play.googleapis.com` | Play Services, background |
+
+Three background daemons, **not one user-facing app**, and no
+`http://captive.apple.com` fetch anywhere in the window.
+
+That is iOS's documented behaviour, and the repo's own configd reading predicted
+it: a CarPlay network's service gets rank **`Never`**, so it receives a *scoped*
+route and never the default one. Daemons that bind to any available interface use
+it; apps resolve and connect over the default path, which is cellular — and
+cellular in a basement garage is nothing. Only iOS validating the network, via
+the owner tapping **Check For Internet Access → Use For Internet**, promotes it.
+
+**It does not survive a car restart.** The car had been off since 18:05 and was
+restarted at 18:59; the owner did not tap it, and iOS did not re-probe. This
+answers "does iOS remember *Use For Internet*?" — no, not across an
+association — and it means the box is useless until that tap, every single time.
+
+The box now says so rather than reporting success. iOS validates over plain HTTP
+and the box is the router, so two named nftables counters per car (`probe_<car>`
+for `tcp dport 80` from the car prefix, `fwd_<car>` for everything) make the
+difference between *a phone is on our prefix* and *a phone will actually route
+app traffic through us* measurable:
+
+- `phone_unvalidated` — a phone has held the prefix 20 s with no probe. Tap it.
+- `validated` — iOS probed. This is the moment the box becomes useful.
+
+The counters carry no verdict of their own, so the measurement cannot change what
+the firewall does, and the baseline is per serving session: they are cumulative
+for the table's lifetime while iOS re-evaluates per association.
+
 ### Learned thresholds
 
 Since every dBm number above is a property of one basement and one pair of
@@ -178,7 +223,12 @@ plausible numbers, and nothing goes red.
    the F22 itself, not the length of the drive.
 2. **The disassoc burst.** Does cutting the redundant request measurably shrink it,
    and does the burst matter to CarPlay at all?
-3. **Car restart:** does iOS remember *Use For Internet*, or must it be tapped each time?
+3. ~~**Car restart:** does iOS remember *Use For Internet*?~~ **Answered
+   2026-11-11: no.** It must be tapped after each car restart, and until it is,
+   apps get nothing while the box looks perfectly healthy. See above. What is
+   still open is whether anything can be done about it from the box's side, or
+   whether an iOS Shortcuts automation on "CarPlay connects" can reach the
+   toggle.
 4. **IPv4-only services:** a few Apple endpoints and Mapbox have no AAAA. DNS64 + NAT64 on the box would cover them.
 5. **Scaling.** The software serves a car per radio without limit; the RF does not.
    Ten AR9271s in one box all on channel 11 would contend with the very CarPlay

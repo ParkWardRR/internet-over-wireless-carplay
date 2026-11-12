@@ -84,6 +84,20 @@ flowchart LR
 See [findings.md](docs/findings.md) for what the measurements actually showed —
 including a leading hypothesis that the data did not support.
 
+> [!IMPORTANT]
+> **You have to tap "Use For Internet" on the phone every time the car
+> restarts.** iOS gives a CarPlay network's service rank `Never`: it gets a
+> scoped route and nothing more, so background daemons use it and your *apps do
+> not*. Until iOS validates the network — Settings → Wi-Fi → the car network →
+> **Check For Internet Access**, then **Use For Internet** — Maps will not load
+> even though the box is working perfectly, and the setting does **not** carry
+> over to the next time you start the car.
+>
+> The box detects this and logs `phone_unvalidated` with the fix in the hint, so
+> you are not left guessing; `validated` confirms the tap took effect. It cost a
+> whole instrumented drive to work this out, which is why it is the first thing
+> in this README after the feature list.
+
 ## The problem
 
 Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 digits> CarPlay`). That network hands out an address but no router and no DNS, and its beacon says "no internet". So the phone keeps cellular as its internet path, and underground there's no cellular: Google Maps can't search or route until you drive out.
