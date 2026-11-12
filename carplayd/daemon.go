@@ -47,6 +47,7 @@ type daemon struct {
 	blocked      []netip.Prefix // what the firewall currently keeps phones from
 	prof         *profiles      // learned per-car thresholds (shared)
 	savedProf    time.Time
+	scans        scanWatch  // empty-scan counter behind the radio stall watchdog
 	servingMu    sync.Mutex // guards `serving` against the box-wide upstream poller
 	owner        bool       // this link maintains the shared firewall, NAT and learned state
 	fw           Config     // the whole configuration, for rules that must cover every car
@@ -126,9 +127,10 @@ func run(name string, args ...string) error {
 
 func writeSysctl(path, v string) error { return os.WriteFile(path, []byte(v), 0o644) }
 
-// setup creates our STA, tunes it, sets up NAT66 if asked, and starts a
-// private wpa_supplicant.
-func (d *daemon) setup() error {
+// setupSTA creates this link's STA netdev on its phy and tunes it. Separate
+// from setup so a stalled radio can have its interface rebuilt without
+// touching NAT, the firewall or the other links.
+func (d *daemon) setupSTA() error {
 	c := d.cfg
 	if _, err := net.InterfaceByName(c.STA); err != nil {
 		if err := run("iw", "phy", c.Phy, "interface", "add", c.STA, "type", "managed"); err != nil {
@@ -146,6 +148,16 @@ func (d *daemon) setup() error {
 		return err
 	}
 	run("iw", "dev", c.STA, "set", "power_save", "off") // best effort; not all drivers allow it
+	return nil
+}
+
+// setup creates our STA, tunes it, sets up NAT66 if asked, and starts a
+// private wpa_supplicant.
+func (d *daemon) setup() error {
+	if err := d.setupSTA(); err != nil {
+		return err
+	}
+	c := d.cfg
 	// NAT and the firewall are box-wide: one table covering every car link, so
 	// only the owning link builds them.
 	if d.owner {
@@ -372,6 +384,13 @@ func (d *daemon) onScanResults() {
 	}
 	seen := parseScanResults(r)
 	now := time.Now()
+	// A scan that saw nothing at all, repeatedly, means this radio has gone
+	// deaf: the car channel always carries neighbourhood APs even with every
+	// car switched off.
+	if d.scans.observe(len(seen)) {
+		d.recoverRadio()
+		return
+	}
 	// Every BSS in the scan, not just the configured cars: a car that is on
 	// but unseen, or on a channel we do not hunt, looks identical to a car
 	// that is off unless the whole scan is on record.
@@ -459,6 +478,7 @@ func (d *daemon) onConnected() {
 	d.ev("connected", car.ID, kv["bssid"], "freq="+kv["freq"], "key_mgmt="+kv["key_mgmt"],
 		"pairwise="+kv["pairwise_cipher"], "group="+kv["group_cipher"], "wifi_generation="+kv["wifi_generation"])
 	d.m.inc("joins")
+	d.scans.recovered()
 	if t, ok := d.firstSeen[car.ID]; ok {
 		d.m.setCar(car.ID, func(c *carMetric) { c.detect = time.Since(t).Seconds() })
 	}
