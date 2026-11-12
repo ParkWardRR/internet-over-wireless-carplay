@@ -699,7 +699,16 @@ func (d *daemon) poll() {
 			// leave, join while driving off. A dip while parked recovers there.
 			d.relaxed[car.ID] = max(base-3, car.Join)
 		}
-		d.cmd.ok("DISCONNECT")
+		// One disconnect request, not two. Measured on the F22 departure: the
+		// leave path produced 8 distinct disassoc frames, each retried 7 times
+		// by the driver because the head unit never ACKed one of them -- 51
+		// transmissions, all at 1 Mb/s, roughly 40 ms of solid channel time in
+		// one burst, at the exact moment CarPlay is live. DISABLE_NETWORK both
+		// disconnects and stops wpa_supplicant reconnecting, so the explicit
+		// DISCONNECT only added frames. The driver's own 7 retries remain.
+		//
+		// The phone does not depend on this: its goodbye RA went out in
+		// stopServing above, before any of it.
 		d.cmd.ok("DISABLE_NETWORK all")
 		return
 	}
