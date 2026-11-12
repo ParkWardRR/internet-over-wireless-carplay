@@ -133,3 +133,40 @@ func TestSkewSummaryUsesMedian(t *testing.T) {
 		t.Errorf("window not reset after summarising: %d left", len(b.skews))
 	}
 }
+
+// The Beam gained six IMU axes on the $CNB line once the QMI8658 came back to
+// life after its first ever cold power cycle. They are appended after the
+// original 13 fields, so this checks both directions of compatibility: a new
+// Beam's extra fields are recorded, and an old Beam's shorter line still
+// yields its GPS time rather than being dropped.
+func TestCNBImuFieldsAreOptional(t *testing.T) {
+	const (
+		old = "$CNB,2026-11-12T06:18:37.000Z,1,9,34.012345,-118.498765,3.0,287.1,2.07,-0.58,-10.5,0,4077"
+		imu = old + ",+0.012,-0.004,+0.998,+0.3,-0.1,+0.2,1500,0"
+	)
+	b, read := drain(t)
+
+	b.handle(old)
+	if got := read(); !strings.Contains(got, "gps_time=2026-11-12T06:18:37.000Z") {
+		t.Fatalf("a 13-field line from older firmware was not handled: %q", got)
+	} else if strings.Contains(got, "ax=") {
+		t.Errorf("invented IMU fields from a line that has none: %s", got)
+	}
+
+	b.handle(imu)
+	got := read()
+	if b.lines != 2 {
+		t.Fatalf("the IMU line was dropped: %d lines handled, want 2", b.lines)
+	}
+	for _, want := range []string{"ax=+0.012", "ay=-0.004", "az=+0.998",
+		"gx=+0.3", "gy=-0.1", "gz=+0.2", "imu_reads=1500", "imu_fails=0"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in: %s", want, got)
+		}
+	}
+	// The GPS time must survive either way: it is the only field the recorder
+	// cannot derive for itself, and losing it breaks clock alignment.
+	if !strings.Contains(got, "pi_skew_ms=") {
+		t.Errorf("no skew computed from the IMU line: %s", got)
+	}
+}

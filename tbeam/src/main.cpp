@@ -265,11 +265,22 @@ void loop() {
         // The recorder's Pi has no network in the car, so this is where its log
         // gets GPS time to align against -- and the recorder writes it down
         // rather than stepping its clock mid-capture, which would be worse.
-        Serial.printf("$CNB,%s,%d,%d,%.6f,%.6f,%.1f,%.1f,%.2f,%+.2f,%+.1f,%lu,%d\n", t,
+        // The six IMU axes are appended, not inserted: the recorder's parser
+        // keys off field positions and accepts any line with at least the
+        // original 13, so an older bridge keeps working against a newer Beam.
+        //
+        // They are on this line at all because the IMU's data was previously
+        // only ever written to the Beam's own SD card. The point of the Beam is
+        // to log a drive together with the recorder, unattended -- which it
+        // could not do for the one signal the recorder cannot produce itself.
+        Serial.printf("$CNB,%s,%d,%d,%.6f,%.6f,%.1f,%.1f,%.2f,%+.2f,%+.1f,%lu,%d"
+                      ",%+.3f,%+.3f,%+.3f,%+.1f,%+.1f,%+.1f,%lu,%lu\n", t,
                       gps.fix.valid ? 1 : 0, gps.fix.sats, gps.fix.lat, gps.fix.lon,
                       gps.fix.speedMph(), mag.present ? mag.headingDeg : -1.0f,
                       gps.fix.hdop, gpsAccelMps2, gpsTurnDps,
-                      (unsigned long)logger.marks, pmu.getBattVoltage());
+                      (unsigned long)logger.marks, pmu.getBattVoltage(),
+                      imu.ax, imu.ay, imu.az, imu.gx, imu.gy, imu.gz,
+                      (unsigned long)imu.reads, (unsigned long)imu.failures);
     }
 
     if (now - lastFlush >= LOG_FLUSH_MS) {
@@ -310,10 +321,14 @@ void loop() {
             }
         }
         Serial.printf("[status] up %lus  gps %s %dsat (nmea %lu bad %lu)  mag %s  imu %s(m0 0x%02X m3 0x%02X: %s)  "
+                      "a=%+.2f,%+.2f,%+.2f g |g|=%.2f rd %lu/fail %lu  "
                       "sd %s %luKB drop %lu  rows %lu marks %lu  batt %dmV %d%%  %.0fC\n",
                       (unsigned long)(now / 1000), gps.fix.valid ? "fix" : "nofix", gps.fix.sats,
                       (unsigned long)gps.stats.sentences, (unsigned long)gps.stats.badChecksum,
                       mag.present ? "ok" : "--", imu.present ? "ok" : "--", imu.whoami, imu.whoami3, imu.why,
+                      imu.ax, imu.ay, imu.az,
+                      imu.magnitudeG(),
+                      (unsigned long)imu.reads, (unsigned long)imu.failures,
                       logger.mounted ? "ok" : "--", (unsigned long)(logger.written / 1024),
                       (unsigned long)logger.dropped, (unsigned long)logger.rows,
                       (unsigned long)logger.marks, pmu.getBattVoltage(), pmu.getBatteryPercent(),

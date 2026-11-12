@@ -134,6 +134,21 @@ func (b *bridge) handle(line string) {
 			"lat=" + f[4], "lon=" + f[5], "mph=" + f[6], "heading=" + f[7],
 			"hdop=" + f[8], "accel=" + f[9], "turn=" + f[10],
 			"marks=" + f[11], "batt_mv=" + f[12]}
+		// The six IMU axes, appended by the Beam after the original 13 fields.
+		// Optional on purpose: the IMU on this board spent a week unreadable and
+		// a Beam running older firmware omits them entirely, so their absence
+		// must degrade to "no IMU data" rather than dropping the whole line --
+		// the line still carries the GPS time the recorder needs to align its
+		// clock, which is the one thing that must never be lost.
+		if len(f) >= 19 {
+			args = append(args, "ax="+f[13], "ay="+f[14], "az="+f[15],
+				"gx="+f[16], "gy="+f[17], "gz="+f[18])
+		}
+		if len(f) >= 21 {
+			// Read and failure counts: an IMU that attaches and then stops
+			// answering looks identical to a stationary one in the axes alone.
+			args = append(args, "imu_reads="+f[19], "imu_fails="+f[20])
+		}
 		if gt, ok := parseGPSTime(f[1]); ok {
 			d := skew(time.Now(), gt)
 			b.lastSkew, b.haveSkew = d, true
