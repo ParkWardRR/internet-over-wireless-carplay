@@ -25,6 +25,12 @@ type carMetric struct {
 	signal  int
 	phones  int
 	detect  float64 // seconds from first scan sighting to connected, last time
+	// probeBytes is iOS's http://captive.apple.com validation fetch, which is
+	// the only thing that distinguishes "a phone is on our prefix" from "a
+	// phone will actually route app traffic through us". fwdBytes is everything
+	// forwarded from the car prefix, for context. See daemon.checkValidated.
+	probeBytes int64
+	fwdBytes   int64
 }
 
 func newMetrics() *metrics {
@@ -90,6 +96,14 @@ func (m *metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		up = 1
 	}
 	fmt.Fprintf(w, "# HELP carplayd_upstream 1 while the internet is reachable through the uplink.\n# TYPE carplayd_upstream gauge\ncarplayd_upstream %d\n", up)
+	fmt.Fprintf(w, "# HELP carplayd_phone_probe_bytes iOS internet-validation fetches from the car prefix. Zero means apps will not use this link.\n# TYPE carplayd_phone_probe_bytes counter\n")
+	for _, id := range ids {
+		fmt.Fprintf(w, "carplayd_phone_probe_bytes{car=%q} %d\n", id, m.cars[id].probeBytes)
+	}
+	fmt.Fprintf(w, "# TYPE carplayd_phone_forward_bytes counter\n")
+	for _, id := range ids {
+		fmt.Fprintf(w, "carplayd_phone_forward_bytes{car=%q} %d\n", id, m.cars[id].fwdBytes)
+	}
 	fmt.Fprintf(w, "# TYPE carplayd_detect_seconds gauge\n")
 	for _, id := range ids {
 		fmt.Fprintf(w, "carplayd_detect_seconds{car=%q} %.3f\n", id, m.cars[id].detect)

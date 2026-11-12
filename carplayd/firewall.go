@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -40,7 +41,39 @@ func nftRuleset(cfg Config, block []netip.Prefix) string {
 		}
 		b.WriteString("\t}\n")
 
+		// Named counters, declared before the chain that references them.
+		//
+		// `probe_<car>` is the one that matters. iOS gives a CarPlay network's
+		// service rank Never, so it gets a scoped route and no more: system
+		// daemons that bind to any interface will use it, apps never will,
+		// until iOS validates the network for internet and the owner's
+		// "Use For Internet" is on. iOS validates by fetching
+		// http://captive.apple.com over that interface -- plain HTTP, port 80,
+		// which almost nothing else on an iPhone uses. So this counter staying
+		// at zero while a phone holds our prefix means the phone is not going
+		// to send app traffic through us, and the box can say so.
+		//
+		// Measured on the 2026-11-11 trip, which is why this exists: the phone
+		// took the prefix, got DNS answers and ran 1.36 MB through us -- all of
+		// it APNS, dns.google and Play Services, not one user-facing app -- and
+		// the owner had no Wi-Fi icon on CarPlay and no Maps. Nothing in any log
+		// distinguished that from working.
+		for _, c := range cfg.Cars {
+			fmt.Fprintf(&b, "\tcounter probe_%s {}\n\tcounter fwd_%s {}\n", counterID(c.ID), counterID(c.ID))
+		}
+
 		b.WriteString("\tchain forward {\n\t\ttype filter hook forward priority -10; policy accept;\n")
+		// Counting first, and with no verdict of its own so evaluation falls
+		// through: what the phone *tried* to do is the measurement, whether or
+		// not a later rule rejects it.
+		for _, c := range cfg.Cars {
+			sta := c.STA
+			if sta == "" {
+				sta = cfg.STA
+			}
+			fmt.Fprintf(&b, "\t\tiifname %q ip6 saddr %s counter name \"fwd_%s\"\n", sta, c.Prefix, counterID(c.ID))
+			fmt.Fprintf(&b, "\t\tiifname %q ip6 saddr %s tcp dport 80 counter name \"probe_%s\"\n", sta, c.Prefix, counterID(c.ID))
+		}
 		for _, sta := range cfg.stas() {
 			fmt.Fprintf(&b, "\t\tiifname %q meta nfproto ipv4 drop\n", sta)
 			fmt.Fprintf(&b, "\t\tiifname %q ip6 daddr { %s } reject\n", sta, strings.Join(nets, ", "))
@@ -61,6 +94,53 @@ func nftRuleset(cfg Config, block []netip.Prefix) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// counterID makes an nftables identifier out of a car ID, which is free-form
+// in the config file ("A", "F32", "the blue one").
+func counterID(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "unnamed"
+	}
+	return b.String()
+}
+
+// nftCounter is one named counter's running total.
+type nftCounter struct {
+	Packets int64
+	Bytes   int64
+}
+
+// parseNftCounters reads `nft -j list counters table inet carplayd`.
+func parseNftCounters(out []byte) map[string]nftCounter {
+	var doc struct {
+		Nftables []struct {
+			Counter *struct {
+				Name    string `json:"name"`
+				Packets int64  `json:"packets"`
+				Bytes   int64  `json:"bytes"`
+			} `json:"counter"`
+		} `json:"nftables"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		return nil
+	}
+	m := map[string]nftCounter{}
+	for _, e := range doc.Nftables {
+		if e.Counter != nil {
+			m[e.Counter.Name] = nftCounter{e.Counter.Packets, e.Counter.Bytes}
+		}
+	}
+	return m
 }
 
 // stas lists the distinct STA netdevs serving cars, in config order. With one

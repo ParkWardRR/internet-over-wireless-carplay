@@ -27,6 +27,8 @@ import (
 func main() {
 	path := flag.String("c", "/etc/carplayd.conf", "config file")
 	check := flag.Bool("check", false, "validate the config, print the wpa_supplicant config (PSKs masked) and exit")
+	// Separate from -check so it can be piped straight into `nft -c -f -`.
+	nftOut := flag.Bool("nft", false, "print the nftables ruleset this config produces and exit")
 	flag.Parse()
 
 	f, err := os.Open(*path)
@@ -39,6 +41,15 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "carplayd: config:", err)
 		os.Exit(1)
+	}
+	// The ruleset on its own, so nft itself can check it before the box ever
+	// applies it: `carplayd -nft | nft -c -f -`. Until this existed the ruleset
+	// was only visible after installation, which is a poor moment to find a
+	// syntax error -- an nft failure at startup leaves the car link with no
+	// isolation and no NAT.
+	if *nftOut {
+		fmt.Print(nftRuleset(cfg, nil))
+		return
 	}
 	if *check {
 		printCheck(cfg)

@@ -49,6 +49,15 @@ type daemon struct {
 	prof         *profiles      // learned per-car thresholds (shared)
 	savedProf    time.Time
 	scans        scanWatch // empty-scan counter behind the radio stall watchdog
+	// Whether iOS has validated this car network for internet use, which a
+	// phone holding our prefix does NOT imply. See checkValidated.
+	phoneSince  time.Time
+	validated   bool
+	warnedUnval bool
+	probeBase   int64 // probe counter when this session began; -1 = not taken yet
+	// counters reads the firewall's named counters. A field so the validation
+	// logic can be tested without nftables; nil means shell out to nft.
+	counters func() map[string]nftCounter
 	// Debug-log rate limiting for the once-a-second hunt chatter: the set of
 	// BSSIDs last logged, and per-event-prefix last-logged time and suppressed
 	// count. Only ever read and written from this link's own goroutine.
@@ -573,6 +582,12 @@ func (d *daemon) startServing(car *Car) {
 	d.ra, d.below, d.belowTrend, d.samples = ra, time.Time{}, time.Time{}, nil
 	d.resetFail() // the new station's counters start from their own zero
 	d.servingSince, d.lastPhone, d.phones = time.Now(), time.Time{}, 0
+	// Validation is per association: iOS re-evaluates each time the car's AP
+	// comes back, and the 2026-11-11 trip is the evidence that it does not
+	// carry over. The nftables counters are cumulative for the table's
+	// lifetime, so this session's baseline has to be taken fresh -- otherwise
+	// one probe hours ago would make every later session look validated.
+	d.resetValidation()
 	d.m.setCar(car.ID, func(c *carMetric) { c.serving, c.phones = true, 0 })
 	ra.start(!d.up.ok)
 	d.ev("serving", car.ID, car.Prefix.String(), map[bool]string{true: "route", false: "withdrawn"}[d.up.ok])
@@ -649,6 +664,90 @@ func (d *daemon) readFail(link map[string]string, now time.Time) {
 // compared against the previous one's.
 func (d *daemon) resetFail() {
 	d.failSamples, d.failPerSec, d.belowFail = nil, 0, time.Time{}
+}
+
+// nftCounters reads the firewall's named counters, or nil if they cannot be
+// read. Overridable for tests via d.counters.
+func (d *daemon) nftCounters() map[string]nftCounter {
+	if d.counters != nil {
+		return d.counters()
+	}
+	out, err := exec.Command("nft", "-j", "list", "counters", "table", "inet", "carplayd").Output()
+	if err != nil {
+		return nil
+	}
+	return parseNftCounters(out)
+}
+
+// resetValidation starts a fresh validation session. Called when serving
+// begins, because iOS re-evaluates per association and the nftables counters
+// are cumulative for the table's lifetime: without a fresh baseline one probe
+// hours ago would make every later session look validated.
+func (d *daemon) resetValidation() {
+	d.phoneSince, d.validated, d.warnedUnval, d.probeBase = time.Time{}, false, false, -1
+}
+
+// validateGrace is how long a phone may hold our prefix without iOS having
+// validated the network before the box says so. iOS probes within a second or
+// two of joining; 20 s is long enough that a slow start is not reported.
+const validateGrace = 20 * time.Second
+
+// checkValidated answers the question no log could answer before: is the phone
+// actually going to send app traffic through us?
+//
+// It is not the same question as "is the phone on our prefix", and the
+// difference is the whole 2026-11-11 trip. The phone held the prefix, resolved
+// names through us and pushed 1.36 MB of APNS and Play Services traffic, while
+// the owner had no Wi-Fi icon on CarPlay and Maps would not load. iOS had never
+// validated the network, so apps stayed on cellular -- which underground is
+// nothing. Every event in the log looked like success.
+//
+// The signal is iOS's own validation fetch of http://captive.apple.com: plain
+// HTTP from the car prefix, which the firewall counts. No probe, no apps.
+func (d *daemon) checkValidated(phones int, now time.Time) {
+	if d.cfg.Firewall != "nft" || d.serving == nil {
+		return
+	}
+	if phones == 0 {
+		d.phoneSince = time.Time{} // nobody to validate; start over when one appears
+		return
+	}
+	if d.phoneSince.IsZero() {
+		d.phoneSince = now
+	}
+	cs := d.nftCounters()
+	if cs == nil {
+		return
+	}
+	id := counterID(d.serving.ID)
+	probe, fwd := cs["probe_"+id], cs["fwd_"+id]
+	if d.probeBase < 0 {
+		d.probeBase = probe.Packets
+	}
+	probed := probe.Packets - d.probeBase
+	d.m.setCar(d.serving.ID, func(c *carMetric) { c.probeBytes, c.fwdBytes = probe.Bytes, fwd.Bytes })
+	d.dbg("validated", d.serving.ID,
+		fmt.Sprintf("probe_pkts=%d probe_bytes=%d fwd_bytes=%d phone_for=%s",
+			probed, probe.Bytes, fwd.Bytes, since(d.phoneSince, now)))
+
+	validated := probed > 0
+	if validated != d.validated {
+		d.validated = validated
+		d.warnedUnval = validated // a probe clears the warning for the next phone
+		if validated {
+			// Worth its own event: it is the moment the box becomes useful, and
+			// the owner tapping "Use For Internet" is what causes it.
+			d.ev("validated", d.serving.ID, "probe_pkts="+strconv.FormatInt(probed, 10))
+		}
+	}
+	if !validated && !d.warnedUnval && now.Sub(d.phoneSince) >= validateGrace {
+		d.warnedUnval = true
+		d.ev("phone_unvalidated", d.serving.ID,
+			"phone_for="+since(d.phoneSince, now),
+			"fwd_bytes="+strconv.FormatInt(fwd.Bytes, 10),
+			"hint=iOS has not validated this network; tap Check For Internet Access / Use For Internet on the phone")
+		d.m.inc("unvalidated")
+	}
 }
 
 // leaveDecision is what one poll concluded. A zero value means stay.
@@ -777,6 +876,7 @@ func (d *daemon) poll() {
 		if d.cfg.Learn && d.prof != nil {
 			d.prof.Observe(d.serving.ID, sig, d.failPerSec, d.failPerSec <= 1)
 		}
+		d.checkValidated(n, now)
 		d.dbg("neigh", d.serving.ID, strings.Join(strings.Fields(strings.ReplaceAll(string(out), "\n", " | ")), " "))
 	}
 	// Leave while the link is still usable: below the absolute threshold, or
