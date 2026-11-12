@@ -34,6 +34,35 @@ type bridge struct {
 	marks    uint64
 	lastSkew time.Duration
 	haveSkew bool
+	skews    []int64   // recent skews, ms, for the periodic summary
+	nextSum  time.Time
+}
+
+// summarise reports the median skew over the recent window.
+//
+// The raw skew is the Pi's clock minus the Beam's GPS time, so it contains a
+// fixed pipeline latency (the Beam reports a GPS second about a second after it
+// began) plus whatever the Pi's clock is actually off by. Measured against an
+// NTP-locked Pi the latency alone came to ~1045 ms, very stable. Logging the
+// median before the drive and again during it therefore separates the two: any
+// movement away from that baseline is the Pi's clock drifting once NTP is gone,
+// which is the number the log merge actually needs.
+//
+// Median, not mean: a row built twice inside one GPS second shows up as a
+// ~1000 ms outlier and would drag an average.
+func (b *bridge) summarise() {
+	if len(b.skews) == 0 {
+		return
+	}
+	v := append([]int64(nil), b.skews...)
+	for i := 1; i < len(v); i++ {
+		for j := i; j > 0 && v[j] < v[j-1]; j-- {
+			v[j], v[j-1] = v[j-1], v[j]
+		}
+	}
+	med := v[len(v)/2]
+	b.ev("skew_summary", fmt.Sprintf("median_ms=%d n=%d min_ms=%d max_ms=%d", med, len(v), v[0], v[len(v)-1]))
+	b.skews = b.skews[:0]
 }
 
 func (b *bridge) ev(name string, args ...string) {
@@ -108,11 +137,16 @@ func (b *bridge) handle(line string) {
 		if gt, ok := parseGPSTime(f[1]); ok {
 			d := skew(time.Now(), gt)
 			b.lastSkew, b.haveSkew = d, true
+			b.skews = append(b.skews, d.Milliseconds())
 			args = append(args, fmt.Sprintf("pi_skew_ms=%d", d.Milliseconds()))
 		} else {
 			args = append(args, "pi_skew_ms=unknown")
 		}
 		b.ev("beam", args...)
+		if now := time.Now(); now.After(b.nextSum) {
+			b.summarise()
+			b.nextSum = now.Add(time.Minute)
+		}
 	}
 }
 

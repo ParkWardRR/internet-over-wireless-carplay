@@ -110,3 +110,26 @@ func TestGarbageIgnored(t *testing.T) {
 		t.Errorf("garbage was logged as data: %q", got)
 	}
 }
+
+// The periodic summary must use the median, not the mean: a row built twice
+// inside one GPS second appears as a ~1000 ms outlier, and an average would let
+// it move the baseline that the whole log merge is calibrated against.
+func TestSkewSummaryUsesMedian(t *testing.T) {
+	b, read := drain(t)
+	// Twenty good samples around 1045 ms and two second-boundary outliers.
+	for i := 0; i < 20; i++ {
+		b.skews = append(b.skews, 1045)
+	}
+	b.skews = append(b.skews, 2045, 2046)
+	b.summarise()
+	got := read()
+	if !strings.Contains(got, "median_ms=1045") {
+		t.Errorf("median was dragged by the outliers: %q", got)
+	}
+	if !strings.Contains(got, "n=22") || !strings.Contains(got, "max_ms=2046") {
+		t.Errorf("summary lost the outliers it should still report: %q", got)
+	}
+	if len(b.skews) != 0 {
+		t.Errorf("window not reset after summarising: %d left", len(b.skews))
+	}
+}
