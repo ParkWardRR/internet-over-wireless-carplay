@@ -7,8 +7,15 @@
 #   scripts/deploy-carplayd-sbc.sh            deploy / update
 #   scripts/deploy-carplayd-sbc.sh rollback   back to carplay-box.sh (NetworkManager)
 #
-# Thresholds are lab-loose (join -88 / leave -92 / rejoin -85) until the signal
-# survey from the SBC's spot (docs/two-cars.md, B2).
+# The configured thresholds are only a cold-start fallback: with learn = on the
+# box measures each car's own healthy band and derives join/leave/rejoin from
+# it, which is the only workable answer behind a cinderblock wall where parked
+# and dying signal overlap (docs/findings.md).
+#
+# Keep this heredoc as the single source of truth for the box's config. It was
+# edited by hand once, which left the running box with settings this script did
+# not know how to write -- so the next run of the script would have silently
+# reverted them.
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SBC=${SBC:-user@garage-sbc.local}
@@ -28,8 +35,10 @@ fi
 echo "building on build-host..."
 rsync -a --delete --exclude secrets/ --exclude .git/ --exclude emu/out/ --exclude 'ios/CarNetProbe/*.xcodeproj' \
 	"$HERE/" "$BUILD:builds/carplay-deploy/"
-ssh "$BUILD" 'mkdir -p ~/builds/carplay-deploy && cd ~/builds/carplay-deploy && rm -f emu/out/carplayd-arm64 && emu/run.sh carplayd > emu/out/deploy-build.log 2>&1; s=$?; tail -1 emu/out/deploy-build.log; [ $s -eq 0 ] && [ -s emu/out/carplayd-arm64 ]' || { echo "build failed on $BUILD (see ~/builds/carplay-deploy/emu/out/deploy-build.log); nothing deployed" >&2; exit 1; }
-scp -q "$BUILD:builds/carplay-deploy/emu/out/carplayd-arm64" "$TMP/carplayd"
+# scripts/release.sh, not a bespoke build line: whatever lands on the box has to
+# be reproducible from the tree, and it gofmt/vet/race-tests before it builds.
+ssh "$BUILD" 'cd ~/builds/carplay-deploy && rm -f out/carplayd-linux-arm64 && scripts/release.sh carplayd > out/deploy-build.log 2>&1; s=$?; tail -3 out/deploy-build.log; [ $s -eq 0 ] && [ -s out/carplayd-linux-arm64 ]' || { echo "build failed on $BUILD (see ~/builds/carplay-deploy/out/deploy-build.log); nothing deployed" >&2; exit 1; }
+scp -q "$BUILD:builds/carplay-deploy/out/carplayd-linux-arm64" "$TMP/carplayd"
 
 # The F32 is car B in secrets (BMW#####), the F22 car A (BMW#####); carplayd
 # calls the F32 "A" (priority) and the F22 "B".
@@ -41,12 +50,25 @@ uplink = eth0
 nat66 = nft
 firewall = nft
 events = /var/lib/carplayd/events.log
-survey = 2s
+survey = ${SURVEY:-2s}
 # Leave while the link is still usable; a missed goodbye strands the phone
 # at most 12 s (3 x the 4 s max RA interval).
 leave_for = 2s
 router_lifetime = 12s
 metrics = :9111
+
+# DEBUG=on during a drive assessment: every wpa event, scan, station dump,
+# neighbour table and leave decision. Off by default -- it writes roughly a
+# line a second per car, which is a lot of SD card for a box left running.
+debug = ${DEBUG:-off}
+
+# Thresholds are learned per car from how each link actually behaves. Absolute
+# dBm cannot be fixed here: the box sits behind a cinderblock wall 6-11 ft from
+# the cars, so parked and dying signal overlap, and every number moves when a
+# car parks somewhere new or a radio is swapped. The values below are the
+# fallback used until a car has 120 healthy samples.
+learn = ${LEARN:-on}
+state = /var/lib/carplayd/learned.json
 
 [car A]
 ssid = $CAR_B_SSID
@@ -57,15 +79,20 @@ join = -80
 leave = -85
 rejoin = -77
 drop = 6
+${CAR_A_PHY:+phy = $CAR_A_PHY}
+${CAR_A_STA:+sta = $CAR_A_STA}
 
 [car B]
 ssid = $CAR_A_SSID
 psk = $CAR_A_PSK
 channel = 11
+prefix = fd5c:ba1e:f32:b::/64
 join = -80
 leave = -85
 rejoin = -77
 drop = 6
+${CAR_B_PHY:+phy = $CAR_B_PHY}
+${CAR_B_STA:+sta = $CAR_B_STA}
 CONF
 
 scp -q "$TMP/carplayd" "$TMP/carplayd.conf" "$HERE/carplayd/dist/carplayd.service" "$SBC:/tmp/"

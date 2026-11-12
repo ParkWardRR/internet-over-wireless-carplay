@@ -34,7 +34,7 @@ type bridge struct {
 	marks    uint64
 	lastSkew time.Duration
 	haveSkew bool
-	skews    []int64   // recent skews, ms, for the periodic summary
+	skews    []int64 // recent skews, ms, for the periodic summary
 	nextSum  time.Time
 }
 
