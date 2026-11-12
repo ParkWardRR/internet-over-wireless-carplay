@@ -33,9 +33,9 @@ type daemon struct {
 	lastSurvey   map[string]time.Time // last sighting/signal logged per car (survey)
 	samples      []sample             // signal polls of the served car, last 25 s
 	belowTrend   time.Time
-	failSamples  []failSample // tx_failed readings, last failWindow
-	failPerSec   int          // its rise per second across that window
-	belowFail    time.Time    // since when failPerSec has been at or over the car's fail_rate
+	failSamples  []failSample   // tx_failed readings, last failWindow
+	failPerSec   int            // its rise per second across that window
+	belowFail    time.Time      // since when failPerSec has been at or over the car's fail_rate
 	relaxed      map[string]int // rejoin threshold after a trend leave: near the parked level
 	huntTick     int
 	phones       int
@@ -45,6 +45,8 @@ type daemon struct {
 	checking     bool
 	lastCheck    time.Time
 	blocked      []netip.Prefix // what the firewall currently keeps phones from
+	prof         *profiles      // learned per-car thresholds
+	savedProf    time.Time
 }
 
 // ev prints "EV <boottime> carplayd_<name> ..." (the harness's format) and
@@ -261,6 +263,9 @@ func (d *daemon) restartWPA(why string) {
 // shutdown says goodbye, leaves the car, stops wpa_supplicant and removes NAT.
 func (d *daemon) shutdown() {
 	d.stopServing(true)
+	if d.cfg.Learn && d.prof != nil {
+		d.prof.save()
+	}
 	if d.cmd != nil {
 		d.cmd.ok("DISCONNECT")
 		d.cmd.close()
@@ -383,7 +388,7 @@ func (d *daemon) onScanResults() {
 			delete(d.relaxed, id)
 		}
 	}
-	car, e, ok := pick(relaxRejoin(d.cfg.Cars, d.relaxed), d.held, seen)
+	car, e, ok := pick(relaxRejoin(d.learnedCars(), d.relaxed), d.held, seen)
 	if !ok {
 		return
 	}
@@ -395,7 +400,7 @@ func (d *daemon) onScanResults() {
 // arbitrate runs while serving: switch to another car only per shouldSwitch.
 func (d *daemon) arbitrate(seen []scanEntry, now time.Time) {
 	var others []Car
-	for _, c := range d.cfg.Cars {
+	for _, c := range d.learnedCars() {
 		if c.ID != d.serving.ID {
 			others = append(others, c)
 		}
@@ -481,6 +486,29 @@ func (d *daemon) stopServing(goodbye bool) {
 	d.m.set(func(m *metrics) { m.serving, m.phones = "", 0 })
 }
 
+// learned returns a car with its learned thresholds substituted. Absolute dBm
+// values cannot be configured for this problem (see learn.go), so the config is
+// the starting point and the fallback, and what the link actually does decides.
+func (d *daemon) learned(c Car) Car {
+	if !d.cfg.Learn || d.prof == nil {
+		return c
+	}
+	out, _ := d.prof.get(c.ID).derive(c)
+	return out
+}
+
+// learnedCars is cfg.Cars with learning applied, for the join/rejoin decisions.
+func (d *daemon) learnedCars() []Car {
+	if !d.cfg.Learn || d.prof == nil {
+		return d.cfg.Cars
+	}
+	out := make([]Car, len(d.cfg.Cars))
+	for i, c := range d.cfg.Cars {
+		out[i] = d.learned(c)
+	}
+	return out
+}
+
 // readFail updates the tx_failed rate from a station dump. A missing counter
 // leaves the rate untouched rather than reading as zero, so one failed `iw`
 // call cannot clear a failing link's evidence.
@@ -554,6 +582,13 @@ func (d *daemon) poll() {
 			d.lastSurvey[d.serving.ID] = now
 		}
 		d.readFail(link, now)
+		// Learn what this car's link looks like while it is working. Only
+		// healthy polls teach the profile, or it would learn the very failure
+		// the thresholds exist to detect; the measured bimodality (0-1/s
+		// healthy against 7-21/s failing) makes that split unambiguous.
+		if d.cfg.Learn && d.prof != nil {
+			d.prof.get(d.serving.ID).observe(sig, d.failPerSec, d.failPerSec <= 1)
+		}
 		d.dbg("neigh", d.serving.ID, strings.Join(strings.Fields(strings.ReplaceAll(string(out), "\n", " | ")), " "))
 	}
 	// Leave while the link is still usable: below the absolute threshold, or
@@ -689,6 +724,14 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 				go func() { d.healthC <- checkUpstream(d.cfg.HealthTargets, healthTimeout) }()
 			}
 			d.refreshFirewall()
+			// Persist what has been learned, so a restart or a power cut does
+			// not throw away a calibration that took minutes of serving.
+			if d.cfg.Learn && d.prof != nil && time.Since(d.savedProf) > time.Minute {
+				if err := d.prof.save(); err != nil {
+					d.ev("error", "save_profiles", err.Error())
+				}
+				d.savedProf = time.Now()
+			}
 		case r := <-d.healthC:
 			d.checking = false
 			d.onHealth(r)

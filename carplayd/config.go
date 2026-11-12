@@ -63,6 +63,8 @@ type Config struct {
 	Survey        time.Duration // lab: log each visible car's signal this often ("sighting", "signal" events); 0 = off
 	Metrics       string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
 	Debug         bool          // log every wpa event, full scan results, all link counters and the leave decision each poll
+	Learn         bool          // derive each car's thresholds from how its link actually behaves
+	StatePath     string        // where learned profiles are persisted ("" = in memory only)
 	Cars          []Car
 }
 
@@ -75,6 +77,7 @@ func defaultConfig() Config {
 		WPABinary: "wpa_supplicant",
 		NAT66:     "none", IdleSwitch: time.Minute,
 		Firewall: "nft", Health: true, HealthEvery: 3 * time.Second, HealthFail: 2,
+		Learn: true,
 	}
 }
 
@@ -187,6 +190,13 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 		cfg.IdleSwitch, err = time.ParseDuration(v)
 	case "metrics":
 		cfg.Metrics = v
+	case "learn":
+		if v != "on" && v != "off" {
+			return fmt.Errorf("learn must be on or off")
+		}
+		cfg.Learn = v == "on"
+	case "state":
+		cfg.StatePath = v
 	case "debug":
 		if v != "on" && v != "off" {
 			return fmt.Errorf("debug must be on or off")

@@ -50,7 +50,7 @@ func main() {
 		return
 	}
 
-	d := &daemon{cfg: cfg, held: map[string]bool{}, firstSeen: map[string]time.Time{}, lastSurvey: map[string]time.Time{}, relaxed: map[string]int{}, m: newMetrics()}
+	d := &daemon{cfg: cfg, held: map[string]bool{}, firstSeen: map[string]time.Time{}, lastSurvey: map[string]time.Time{}, relaxed: map[string]int{}, m: newMetrics(), prof: loadProfiles(cfg.StatePath)}
 	if cfg.Metrics != "" {
 		if err := d.m.listen(cfg.Metrics); err != nil {
 			fmt.Fprintln(os.Stderr, "carplayd: metrics:", err)
