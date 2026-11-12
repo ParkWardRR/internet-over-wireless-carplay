@@ -15,6 +15,8 @@
 // hard to argue with:
 //
 //   A  read WHO_AM_I now, with the rail long since up (the control)
+//   D  write to the part: restore 4-wire, try 3-wire with the reply on MOSI,
+//      and watch INT1 (see the phase D comment -- reads are exhausted)
 //   B  power-cycle the sensor rail with CS idling HIGH, wait past 1.75 s,
 //      then read repeatedly for 10 s
 //   C  power-cycle the sensor rail with CS held LOW through power-up,
@@ -112,6 +114,146 @@ static void dump(const char *tag, uint32_t hz) {
                   rd(0x00, SPI_MODE0, hz), rd(0x01, SPI_MODE0, hz));
 }
 
+// ---- Phase D: stop reading, start writing -------------------------------
+//
+// Everything above is a read, and every failure we have is a *read* failure.
+// LilyGO's own example fails at `reset(): Reset chip failed, Response val = 0`
+// -- that is the driver writing a soft reset and then failing to read back the
+// confirmation. The register pattern says the same thing: 0x3E across
+// 0x00-0x07, 0x00 across 0x30-0x37, 0xFF with CS deselected. A part answering
+// badly varies with the address; a floating input that MOSI is capacitively
+// coupled into also varies with the address, because the address is what MOSI
+// just clocked out. The second explanation now looks likelier, and it means
+// **MISO is not being driven at all** while the writes may have been landing
+// the whole time.
+//
+// That is worth testing, and it cannot be tested by reading harder. So this
+// phase writes. The program was deliberately read-only -- "a write to a part
+// that is not answering only adds a variable" -- and that was right while reads
+// were unexhausted. They are exhausted.
+//
+// Every write here is to a volatile register and is undone by the cold power
+// cycle that has never yet been performed on this board, so none of it is a
+// one-way door.
+//
+// D1  Restore 4-wire mode. CTRL1 bit 7 (SIM) selects 3-wire SPI; the datasheet
+//     default is 0x20, i.e. 4-wire. But this part has NEVER been power-cycled
+//     (VDD3V3 is a main rail), so if anything ever wrote SIM=1 -- an SD card
+//     transaction while IMU_CS happened to be low would do it -- the part
+//     stopped driving MISO then and has never come back. A blind write of
+//     CTRL1=0x20 undoes exactly that. Writes reach the part in both modes,
+//     because 3-wire shares the host's MOSI line.
+//
+// D2  The workaround, if MISO is broken rather than the part. Put the part
+//     deliberately INTO 3-wire mode and read the reply back on MOSI, which is
+//     a line we know works: every write goes out on it. If WHO_AM_I comes back
+//     0x05 here, the sensor is alive and usable with a bit-banged half-duplex
+//     driver, and the only thing wrong with this board is one broken signal.
+//
+// D3  Alive-or-dead, with no read path at all. Enable the accelerometer and
+//     route data-ready to INT1, then watch the interrupt pin for edges. INT1
+//     is pin 4 of UX1 on net 148; the LilyGO wiki pin table puts the IMU
+//     interrupt on GPIO 33, which is a lead and not confirmed from the
+//     schematic, so a quiet result here proves nothing while a toggling result
+//     proves a great deal: the chip is powered, alive, and accepting writes.
+static const uint8_t REG_CTRL1 = 0x02, REG_CTRL2 = 0x03, REG_CTRL7 = 0x08;
+static const uint8_t CTRL1_4WIRE = 0x20, CTRL1_3WIRE = 0xA0, CTRL1_INT1_4WIRE = 0x28;
+static const int PIN_IMU_INT1 = 33;  // UNVERIFIED: LilyGO wiki pin table
+
+static void wr(uint8_t reg, uint8_t val, uint8_t mode = SPI_MODE0) {
+    deselectCard();
+    periphSPI.beginTransaction(SPISettings(100000, MSBFIRST, mode));
+    digitalWrite(PIN_IMU_CS, LOW);
+    delayMicroseconds(5);
+    periphSPI.transfer((uint8_t)(reg & 0x7F));  // bit 7 clear = write
+    periphSPI.transfer(val);
+    digitalWrite(PIN_IMU_CS, HIGH);
+    periphSPI.endTransaction();
+    delayMicroseconds(20);
+}
+
+// rd3 is a bit-banged half-duplex read: clock the address out on MOSI, then
+// turn MOSI around and sample it. This is how a 3-wire SPI slave replies, and
+// it never touches MISO. SPI mode 0: set data on the falling edge, sample on
+// the rising one.
+static uint8_t rd3(uint8_t reg) {
+    periphSPI.end();  // take the pins back from the peripheral
+    pinMode(PIN_SPI_SCK, OUTPUT);
+    pinMode(PIN_SPI_MOSI, OUTPUT);
+    digitalWrite(PIN_SPI_SCK, LOW);
+    deselectCard();
+    digitalWrite(PIN_IMU_CS, LOW);
+    delayMicroseconds(5);
+
+    for (int i = 7; i >= 0; i--) {  // address, read bit set
+        digitalWrite(PIN_SPI_MOSI, ((reg | 0x80) >> i) & 1);
+        delayMicroseconds(5);
+        digitalWrite(PIN_SPI_SCK, HIGH);
+        delayMicroseconds(5);
+        digitalWrite(PIN_SPI_SCK, LOW);
+    }
+    pinMode(PIN_SPI_MOSI, INPUT);  // the turnaround: the part drives it now
+    delayMicroseconds(5);
+    uint8_t v = 0;
+    for (int i = 7; i >= 0; i--) {
+        digitalWrite(PIN_SPI_SCK, HIGH);
+        delayMicroseconds(5);
+        v |= (uint8_t)(digitalRead(PIN_SPI_MOSI) & 1) << i;
+        digitalWrite(PIN_SPI_SCK, LOW);
+        delayMicroseconds(5);
+    }
+    digitalWrite(PIN_IMU_CS, HIGH);
+    periphSPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
+    return v;
+}
+
+static void phaseD() {
+    Serial.println("\n=== D: writing to the part, because every failure so far is a read failure ===");
+
+    Serial.println("\n-- D1: blind CTRL1=0x20 (SIM=0, 4-wire), then read MISO as usual --");
+    wr(REG_CTRL1, CTRL1_4WIRE);
+    delay(50);
+    for (int i = 0; i < 3; i++) {
+        uint8_t w = rd(0x00, SPI_MODE0);
+        Serial.printf("   WHO_AM_I after 4-wire restore: 0x%02X %s\n", w,
+                      w == 0x05 ? "<<< THE PART IS BACK" : "");
+        delay(100);
+    }
+
+    Serial.println("\n-- D2: CTRL1=0xA0 (SIM=1, 3-wire), reply read back on MOSI, MISO unused --");
+    wr(REG_CTRL1, CTRL1_3WIRE);
+    delay(50);
+    for (int i = 0; i < 3; i++) {
+        uint8_t w = rd3(0x00), r = rd3(0x01);
+        Serial.printf("   3-wire WHO_AM_I=0x%02X REVISION=0x%02X %s\n", w, r,
+                      w == 0x05 ? "<<< ALIVE, AND MISO IS THE ONLY BROKEN SIGNAL" : "");
+        delay(100);
+    }
+    wr(REG_CTRL1, CTRL1_4WIRE);  // leave it as we found it
+    delay(50);
+
+    Serial.printf("\n-- D3: data-ready interrupt on INT1, watched at GPIO %d (UNVERIFIED pin) --\n",
+                  PIN_IMU_INT1);
+    Serial.println("   a toggling pin proves the part is alive and taking writes with no read path;");
+    Serial.println("   a quiet pin proves nothing, because the GPIO may simply be the wrong one.");
+    pinMode(PIN_IMU_INT1, INPUT_PULLDOWN);
+    wr(REG_CTRL2, 0x04);              // accelerometer ODR
+    wr(REG_CTRL7, 0x01);              // aEN: enable the accelerometer
+    wr(REG_CTRL1, CTRL1_INT1_4WIRE);  // INT1 output enable
+    delay(100);
+    int edges = 0, last = digitalRead(PIN_IMU_INT1);
+    for (uint32_t t = millis(); millis() - t < 3000;) {
+        int now = digitalRead(PIN_IMU_INT1);
+        if (now != last) {
+            edges++;
+            last = now;
+        }
+        delayMicroseconds(200);
+    }
+    Serial.printf("   INT1 edges in 3 s: %d  %s\n", edges,
+                  edges > 0 ? "<<< THE PART IS ALIVE" : "(quiet -- dead part, or wrong GPIO)");
+}
+
 void setup() {
     Serial.begin(115200);
     for (uint32_t t = millis(); !Serial && millis() - t < 2500;) delay(10);
@@ -140,6 +282,8 @@ void setup() {
     }
 
     for (uint32_t hz : {100000UL, 500000UL, 4000000UL}) dump("register dump", hz);
+
+    phaseD();
 
     Serial.println("\n=== done.");
     Serial.println("The IMU is on VDD3V3 (schematic UX1 pins 5 and 8), not ALDO2, so it has");
