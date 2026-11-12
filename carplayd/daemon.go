@@ -25,7 +25,7 @@ type daemon struct {
 	lastSig      int
 	missedPings  int
 	m            *metrics
-	evMu         sync.Mutex
+	label        string // which radio this link is, for link-scoped events
 	servingSince time.Time
 	lastPhone    time.Time
 	lastArbScan  time.Time
@@ -39,14 +39,17 @@ type daemon struct {
 	relaxed      map[string]int // rejoin threshold after a trend leave: near the parked level
 	huntTick     int
 	phones       int
-	evFile       *os.File
+	out          *evWriter
 	up           health        // upstream reachability (route withdrawn while down)
 	healthC      chan upstream // results of background checks
 	checking     bool
 	lastCheck    time.Time
 	blocked      []netip.Prefix // what the firewall currently keeps phones from
-	prof         *profiles      // learned per-car thresholds
+	prof         *profiles      // learned per-car thresholds (shared)
 	savedProf    time.Time
+	servingMu    sync.Mutex // guards `serving` against the box-wide upstream poller
+	owner        bool       // this link maintains the shared firewall, NAT and learned state
+	fw           Config     // the whole configuration, for rules that must cover every car
 }
 
 // ev prints "EV <boottime> carplayd_<name> ..." (the harness's format) and
@@ -56,14 +59,32 @@ type daemon struct {
 // stamps wall clock (docs/recon-box.md): correlating the two meant knowing the
 // box's boot instant. Both now carry the same RFC 3339 field.
 func (d *daemon) ev(name string, args ...string) {
-	d.evMu.Lock()
-	defer d.evMu.Unlock()
 	l := fmt.Sprintf("%s EV %.3f carplayd_%s %s",
 		time.Now().Format("2006-01-02T15:04:05.000Z07:00"), boottime(), name, strings.Join(args, " "))
-	l = strings.TrimSpace(l)
-	fmt.Println(l)
-	if d.evFile != nil {
-		d.evFile.WriteString(l + "\n")
+	d.out.write(strings.TrimSpace(l))
+}
+
+// linkEv is for events that belong to a radio rather than a car. With one
+// radio per car, "wpa_restart" or a raw supplicant line is ambiguous unless it
+// says which link it came from; car-scoped events already carry the car ID.
+func (d *daemon) linkEv(name string, args ...string) {
+	d.ev(name, append([]string{d.label}, args...)...)
+}
+
+// evWriter serialises event lines across links. Several daemons share one file
+// and one stdout, and without a single lock their lines interleave mid-string
+// and the log stops being parseable.
+type evWriter struct {
+	mu sync.Mutex
+	f  *os.File
+}
+
+func (w *evWriter) write(line string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	fmt.Println(line)
+	if w.f != nil {
+		w.f.WriteString(line + "\n")
 	}
 }
 
@@ -89,10 +110,10 @@ func (d *daemon) logWPA(e string) {
 	// alone was 90% of a drive's log volume.
 	if strings.HasPrefix(e, "CTRL-EVENT-SCAN-RESULTS") || strings.HasPrefix(e, "CTRL-EVENT-SCAN-STARTED") ||
 		strings.HasPrefix(e, "CTRL-EVENT-NETWORK-NOT-FOUND") {
-		d.dbg("wpa", e)
+		d.dbg("wpa", d.label, e)
 		return
 	}
-	d.ev("wpa", e)
+	d.linkEv("wpa", e)
 }
 
 func run(name string, args ...string) error {
@@ -125,18 +146,18 @@ func (d *daemon) setup() error {
 		return err
 	}
 	run("iw", "dev", c.STA, "set", "power_save", "off") // best effort; not all drivers allow it
-	if err := d.setupNAT(); err != nil {
-		return err
+	// NAT and the firewall are box-wide: one table covering every car link, so
+	// only the owning link builds them.
+	if d.owner {
+		if err := d.setupNAT(); err != nil {
+			return err
+		}
+		if err := d.applyFirewall(d.homeBlock()); err != nil {
+			return err
+		}
 	}
-	if err := d.applyFirewall(d.homeBlock()); err != nil {
-		return err
-	}
-	d.healthC = make(chan upstream, 1)
-	d.up.ok = true
-	if c.Health {
-		r := checkUpstream(c.HealthTargets, healthTimeout)
-		d.up.ok = r.ok
-		d.ev("upstream", map[bool]string{true: "ok", false: "down"}[r.ok], r.detail)
+	if d.healthC == nil {
+		d.healthC = make(chan upstream, 1)
 	}
 	d.m.set(func(m *metrics) { m.upstream = d.up.ok })
 	if err := os.MkdirAll(c.CtrlDir, 0o700); err != nil {
@@ -166,7 +187,7 @@ func (d *daemon) setupNAT() error {
 	if err := run("ip6tables", "-t", "nat", "-A", "POSTROUTING", "-j", natChain); err != nil {
 		return err
 	}
-	for _, car := range d.cfg.Cars {
+	for _, car := range d.fw.Cars {
 		if err := run("ip6tables", "-t", "nat", "-A", natChain, "-s", car.Prefix.String(), "-o", d.cfg.Uplink, "-j", "MASQUERADE"); err != nil {
 			return err
 		}
@@ -247,7 +268,7 @@ func (d *daemon) alive() bool {
 }
 
 func (d *daemon) restartWPA(why string) {
-	d.ev("wpa_restart", why)
+	d.linkEv("wpa_restart", why)
 	d.m.inc("wpa_restarts")
 	d.stopServing(false)
 	for i := 0; ; i++ {
@@ -263,7 +284,7 @@ func (d *daemon) restartWPA(why string) {
 // shutdown says goodbye, leaves the car, stops wpa_supplicant and removes NAT.
 func (d *daemon) shutdown() {
 	d.stopServing(true)
-	if d.cfg.Learn && d.prof != nil {
+	if d.owner && d.cfg.Learn && d.prof != nil {
 		d.prof.save()
 	}
 	if d.cmd != nil {
@@ -439,7 +460,7 @@ func (d *daemon) onConnected() {
 		"pairwise="+kv["pairwise_cipher"], "group="+kv["group_cipher"], "wifi_generation="+kv["wifi_generation"])
 	d.m.inc("joins")
 	if t, ok := d.firstSeen[car.ID]; ok {
-		d.m.set(func(m *metrics) { m.detect = time.Since(t).Seconds() })
+		d.m.setCar(car.ID, func(c *carMetric) { c.detect = time.Since(t).Seconds() })
 	}
 	d.startServing(car)
 }
@@ -460,10 +481,13 @@ func (d *daemon) startServing(car *Car) {
 		d.ev("error", "ra", err.Error())
 		return
 	}
-	d.serving, d.ra, d.below, d.belowTrend, d.samples = car, ra, time.Time{}, time.Time{}, nil
+	d.servingMu.Lock()
+	d.serving = car
+	d.servingMu.Unlock()
+	d.ra, d.below, d.belowTrend, d.samples = ra, time.Time{}, time.Time{}, nil
 	d.resetFail() // the new station's counters start from their own zero
 	d.servingSince, d.lastPhone, d.phones = time.Now(), time.Time{}, 0
-	d.m.set(func(m *metrics) { m.serving, m.phones = car.ID, 0 })
+	d.m.setCar(car.ID, func(c *carMetric) { c.serving, c.phones = true, 0 })
 	ra.start(!d.up.ok)
 	d.ev("serving", car.ID, car.Prefix.String(), map[bool]string{true: "route", false: "withdrawn"}[d.up.ok])
 }
@@ -482,8 +506,11 @@ func (d *daemon) stopServing(goodbye bool) {
 		d.ra.close()
 	}
 	run("ip", "-6", "addr", "del", car.Prefix.Addr().Next().String()+"/64", "dev", d.cfg.STA)
-	d.serving, d.ra = nil, nil
-	d.m.set(func(m *metrics) { m.serving, m.phones = "", 0 })
+	d.servingMu.Lock()
+	d.serving = nil
+	d.servingMu.Unlock()
+	d.ra = nil
+	d.m.setCar(car.ID, func(c *carMetric) { c.serving, c.phones, c.signal = false, 0, 0 })
 }
 
 // learned returns a car with its learned thresholds substituted. Absolute dBm
@@ -493,7 +520,7 @@ func (d *daemon) learned(c Car) Car {
 	if !d.cfg.Learn || d.prof == nil {
 		return c
 	}
-	out, _ := d.prof.get(c.ID).derive(c)
+	out, _ := d.prof.Derive(c)
 	return out
 }
 
@@ -558,7 +585,7 @@ func (d *daemon) poll() {
 		if n > 0 {
 			d.lastPhone = now
 		}
-		d.m.set(func(m *metrics) { m.signal, m.phones = sig, n })
+		d.m.setCar(d.serving.ID, func(c *carMetric) { c.signal, c.phones = sig, n })
 		// The station dump feeds both the survey line and the failing-link
 		// rule, so it is read every poll whenever either wants it.
 		surveying := surveyDue(d.lastSurvey[d.serving.ID], now, d.cfg.Survey)
@@ -587,7 +614,7 @@ func (d *daemon) poll() {
 		// the thresholds exist to detect; the measured bimodality (0-1/s
 		// healthy against 7-21/s failing) makes that split unambiguous.
 		if d.cfg.Learn && d.prof != nil {
-			d.prof.get(d.serving.ID).observe(sig, d.failPerSec, d.failPerSec <= 1)
+			d.prof.Observe(d.serving.ID, sig, d.failPerSec, d.failPerSec <= 1)
 		}
 		d.dbg("neigh", d.serving.ID, strings.Join(strings.Fields(strings.ReplaceAll(string(out), "\n", " | ")), " "))
 	}
@@ -674,12 +701,12 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 	hunt := time.NewTicker(d.cfg.Hunt)
 	pollT := time.NewTicker(d.cfg.Poll)
 	healthT := time.NewTicker(d.cfg.HealthEvery)
-	d.ev("start", d.cfg.STA, d.freqs())
+	d.linkEv("start", d.freqs())
 	d.hunt()
 	for {
 		select {
 		case <-stop:
-			d.ev("stop")
+			d.linkEv("stop")
 			d.shutdown()
 			return
 		case e, ok := <-d.events:
@@ -719,14 +746,13 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 		case <-pollT.C:
 			d.poll()
 		case <-healthT.C:
-			if d.cfg.Health && d.serving != nil && !d.checking {
-				d.checking = true
-				go func() { d.healthC <- checkUpstream(d.cfg.HealthTargets, healthTimeout) }()
+			if !d.owner {
+				continue
 			}
 			d.refreshFirewall()
 			// Persist what has been learned, so a restart or a power cut does
 			// not throw away a calibration that took minutes of serving.
-			if d.cfg.Learn && d.prof != nil && time.Since(d.savedProf) > time.Minute {
+			if d.owner && d.cfg.Learn && d.prof != nil && time.Since(d.savedProf) > time.Minute {
 				if err := d.prof.save(); err != nil {
 					d.ev("error", "save_profiles", err.Error())
 				}
@@ -748,4 +774,13 @@ func (d *daemon) higherPriorityExists() bool {
 		}
 	}
 	return false
+}
+
+// servingNow reports whether this link currently serves a car. Used by the
+// box-wide upstream poller to skip probing when no link has a route to
+// withdraw.
+func (d *daemon) servingNow() bool {
+	d.servingMu.Lock()
+	defer d.servingMu.Unlock()
+	return d.serving != nil
 }

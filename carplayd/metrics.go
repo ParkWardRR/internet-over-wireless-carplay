@@ -10,17 +10,43 @@ import (
 )
 
 // metrics is carplayd's state as Prometheus text, for the lab phase.
+// metrics is carplayd's state as Prometheus text. Per car, not per box: with a
+// radio per car several links serve at once, and a single "serving" gauge would
+// show whichever link wrote last.
 type metrics struct {
 	mu       sync.Mutex
-	serving  string // car ID or ""
-	signal   int
-	phones   int
+	cars     map[string]*carMetric
 	upstream bool
 	counters map[string]int // joins, leaves, goodbyes, link_lost, switches, wpa_restarts
-	detect   float64        // seconds from first scan sighting to connected, last time
 }
 
-func newMetrics() *metrics { return &metrics{counters: map[string]int{}} }
+type carMetric struct {
+	serving bool
+	signal  int
+	phones  int
+	detect  float64 // seconds from first scan sighting to connected, last time
+}
+
+func newMetrics() *metrics {
+	return &metrics{cars: map[string]*carMetric{}, counters: map[string]int{}}
+}
+
+// car returns a car's slot, creating it. Call with mu held.
+func (m *metrics) car(id string) *carMetric {
+	c := m.cars[id]
+	if c == nil {
+		c = &carMetric{}
+		m.cars[id] = c
+	}
+	return c
+}
+
+// setCar mutates one car's metrics under the lock.
+func (m *metrics) setCar(id string, f func(*carMetric)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f(m.car(id))
+}
 
 func (m *metrics) inc(name string) {
 	m.mu.Lock()
@@ -38,19 +64,36 @@ func (m *metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	serving := 0
-	if m.serving != "" {
-		serving = 1
+	ids := make([]string, 0, len(m.cars))
+	for id := range m.cars {
+		ids = append(ids, id)
 	}
-	fmt.Fprintf(w, "# HELP carplayd_serving 1 while serving a car.\n# TYPE carplayd_serving gauge\ncarplayd_serving{car=%q} %d\n", m.serving, serving)
-	fmt.Fprintf(w, "# TYPE carplayd_signal_dbm gauge\ncarplayd_signal_dbm %d\n", m.signal)
-	fmt.Fprintf(w, "# TYPE carplayd_phones gauge\ncarplayd_phones %d\n", m.phones)
+	sort.Strings(ids)
+	fmt.Fprintf(w, "# HELP carplayd_serving 1 while serving a car.\n# TYPE carplayd_serving gauge\n")
+	for _, id := range ids {
+		v := 0
+		if m.cars[id].serving {
+			v = 1
+		}
+		fmt.Fprintf(w, "carplayd_serving{car=%q} %d\n", id, v)
+	}
+	fmt.Fprintf(w, "# TYPE carplayd_signal_dbm gauge\n")
+	for _, id := range ids {
+		fmt.Fprintf(w, "carplayd_signal_dbm{car=%q} %d\n", id, m.cars[id].signal)
+	}
+	fmt.Fprintf(w, "# TYPE carplayd_phones gauge\n")
+	for _, id := range ids {
+		fmt.Fprintf(w, "carplayd_phones{car=%q} %d\n", id, m.cars[id].phones)
+	}
 	up := 0
 	if m.upstream {
 		up = 1
 	}
 	fmt.Fprintf(w, "# HELP carplayd_upstream 1 while the internet is reachable through the uplink.\n# TYPE carplayd_upstream gauge\ncarplayd_upstream %d\n", up)
-	fmt.Fprintf(w, "# TYPE carplayd_detect_seconds gauge\ncarplayd_detect_seconds %.3f\n", m.detect)
+	fmt.Fprintf(w, "# TYPE carplayd_detect_seconds gauge\n")
+	for _, id := range ids {
+		fmt.Fprintf(w, "carplayd_detect_seconds{car=%q} %.3f\n", id, m.cars[id].detect)
+	}
 	names := make([]string, 0, len(m.counters))
 	for k := range m.counters {
 		names = append(names, k)

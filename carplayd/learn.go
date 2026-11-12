@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -203,10 +204,13 @@ func clampDBm(v int) int {
 
 // profiles is the learned state for every car, persisted so a restart does not
 // start from zero.
+// profiles is shared by every link, so each car's profile is reached through
+// the mutex rather than by handing out pointers into the map.
 type profiles struct {
 	Version int                 `json:"version"`
 	Cars    map[string]*profile `json:"cars"`
 	path    string
+	mu      sync.Mutex
 }
 
 const profilesVersion = 1
@@ -215,6 +219,7 @@ func newProfiles(path string) *profiles {
 	return &profiles{Version: profilesVersion, Cars: map[string]*profile{}, path: path}
 }
 
+// get must be called with mu held.
 func (ps *profiles) get(id string) *profile {
 	p := ps.Cars[id]
 	if p == nil {
@@ -222,6 +227,28 @@ func (ps *profiles) get(id string) *profile {
 		ps.Cars[id] = p
 	}
 	return p
+}
+
+// Observe records one poll for a car.
+func (ps *profiles) Observe(id string, rssi, failPerSec int, healthy bool) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.get(id).observe(rssi, failPerSec, healthy)
+}
+
+// Derive returns the car with learned thresholds substituted.
+func (ps *profiles) Derive(c Car) (Car, bool) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	return ps.get(c.ID).derive(c)
+}
+
+// Snapshot is what the decide trace reports about a car's learned band.
+func (ps *profiles) Snapshot(id string) (n int, mean, sd float64, ready bool) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	p := ps.get(id)
+	return p.Healthy.N, p.Healthy.Mean, p.Healthy.sd(), p.ready()
 }
 
 // load reads persisted profiles. A missing file, unreadable file or version
@@ -252,7 +279,9 @@ func (ps *profiles) save() error {
 	if ps.path == "" {
 		return nil
 	}
+	ps.mu.Lock()
 	b, err := json.MarshalIndent(ps, "", "  ")
+	ps.mu.Unlock()
 	if err != nil {
 		return err
 	}
