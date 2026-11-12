@@ -1,5 +1,17 @@
 # imuprobe
 
+> **The IMU was fixed on 2026-11-11 by a cold power cycle** -- USB out *and*
+> the 18650 out for several minutes. That is the "something no test has done"
+> listed at the bottom of this file. The part was never faulty; it had simply
+> never lost power since manufacture, because VDD3V3 is a main rail fed from
+> whichever source is still connected.
+>
+> This program is kept for the next time a sensor on a shared bus goes quiet.
+> Its phase D (writes, 3-wire read-back on MOSI, INT1 watch) is still the right
+> battery to run -- but **run the cold power cycle first**. It is free and it
+> was the answer.
+
+
 A read-only QMI8658 diagnostic for the T-Beam S3 Supreme. It tests the two
 datasheet-conformance faults that both the CarNet Beam firmware and LILYGO's own
 example share, and nothing else.
