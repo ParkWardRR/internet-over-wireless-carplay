@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,8 @@ type Car struct {
 	Priority int          // higher wins when both cars are seen
 	Drop     int          // dB: also leave when the signal falls this far below where it sat 5-20 s ago (0 = off)
 	FailRate int          // tx_failed increments per second that mean the link is dying (0 = off)
+	Phy      string       // the wiphy this car is served on; cars sharing one take turns
+	STA      string       // the STA netdev on that wiphy
 }
 
 // Freq returns the 2.4 GHz centre frequency in MHz, or 0 when the channel is
@@ -169,8 +172,70 @@ func parseConfig(r io.Reader) (Config, error) {
 		if !(c.Rejoin >= c.Join && c.Join > c.Leave) {
 			return cfg, fmt.Errorf("car %s: want rejoin >= join > leave (hysteresis), got %d/%d/%d", c.ID, c.Rejoin, c.Join, c.Leave)
 		}
+		// One radio per car serves them all at once; cars sharing a radio take
+		// turns on it, which is what a single-radio box has always done.
+		if c.Phy == "" {
+			c.Phy = cfg.Phy
+		}
+		if c.STA == "" {
+			if c.Phy == cfg.Phy {
+				c.STA = cfg.STA // the historical single-radio default
+			} else {
+				c.STA = c.Phy + "-sta0"
+			}
+		}
+	}
+	if err := checkRadios(cfg.Cars); err != nil {
+		return cfg, err
 	}
 	return cfg, nil
+}
+
+// checkRadios rejects radio assignments that cannot physically work: one netdev
+// cannot live on two wiphys, and two cars on the same wiphy are the same netdev
+// taking turns, so they cannot ask for different ones.
+func checkRadios(cars []Car) error {
+	staOf := map[string]string{} // phy -> sta
+	phyOf := map[string]string{} // sta -> phy
+	for _, c := range cars {
+		if prev, ok := staOf[c.Phy]; ok && prev != c.STA {
+			return fmt.Errorf("car %s: phy %s already serves sta %s, cannot also use %s", c.ID, c.Phy, prev, c.STA)
+		}
+		if prev, ok := phyOf[c.STA]; ok && prev != c.Phy {
+			return fmt.Errorf("car %s: sta %s is already on phy %s, cannot also be on %s", c.ID, c.STA, prev, c.Phy)
+		}
+		staOf[c.Phy], phyOf[c.STA] = c.STA, c.Phy
+	}
+	return nil
+}
+
+// radios groups the cars by the wiphy that serves them, in first-appearance
+// order. Each group is one independent link: its own wpa_supplicant, STA,
+// router advertisements and leave decisions. One group is the single-radio case
+// the daemon has always handled.
+func (cfg Config) radios() [][]Car {
+	var order []string
+	byPhy := map[string][]Car{}
+	for _, c := range cfg.Cars {
+		if _, seen := byPhy[c.Phy]; !seen {
+			order = append(order, c.Phy)
+		}
+		byPhy[c.Phy] = append(byPhy[c.Phy], c)
+	}
+	out := make([][]Car, 0, len(order))
+	for _, phy := range order {
+		out = append(out, byPhy[phy])
+	}
+	return out
+}
+
+// ctrlDirFor keeps each radio's wpa_supplicant control socket separate; one
+// shared directory would have the instances fighting over the same path.
+func (cfg Config) ctrlDirFor(phy string) string {
+	if len(cfg.radios()) <= 1 {
+		return cfg.CtrlDir // unchanged for the single-radio case
+	}
+	return filepath.Join(cfg.CtrlDir, phy)
 }
 
 func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
@@ -302,6 +367,10 @@ func setCar(c *Car, k, v string) error {
 		c.Priority = atoi(v)
 	case "drop":
 		c.Drop = atoi(v)
+	case "phy":
+		c.Phy = v
+	case "sta":
+		c.STA = v
 	case "fail_rate":
 		c.FailRate = atoi(v)
 		if err == nil && c.FailRate < 0 {
