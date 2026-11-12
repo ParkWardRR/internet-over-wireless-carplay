@@ -48,10 +48,18 @@ type daemon struct {
 	blocked      []netip.Prefix // what the firewall currently keeps phones from
 	prof         *profiles      // learned per-car thresholds (shared)
 	savedProf    time.Time
-	scans        scanWatch  // empty-scan counter behind the radio stall watchdog
-	servingMu    sync.Mutex // guards `serving` against the box-wide upstream poller
-	owner        bool       // this link maintains the shared firewall, NAT and learned state
-	fw           Config     // the whole configuration, for rules that must cover every car
+	scans        scanWatch // empty-scan counter behind the radio stall watchdog
+	// Debug-log rate limiting for the once-a-second hunt chatter: the set of
+	// BSSIDs last logged, and per-event-prefix last-logged time and suppressed
+	// count. Only ever read and written from this link's own goroutine.
+	lastScanKey string
+	lastScanLog time.Time
+	scanSame    int
+	wpaLast     map[string]time.Time
+	wpaSame     map[string]int
+	servingMu   sync.Mutex // guards `serving` against the box-wide upstream poller
+	owner       bool       // this link maintains the shared firewall, NAT and learned state
+	fw          Config     // the whole configuration, for rules that must cover every car
 }
 
 // ev prints "EV <boottime> carplayd_<name> ..." (the harness's format) and
@@ -103,17 +111,47 @@ func (d *daemon) dbg(name string, args ...string) {
 // which hid exactly the ones a failed departure turns on: ASSOC-REJECT and
 // AUTH-REJECT with their status codes, BEACON-LOSS, and the roam/auth timeouts.
 // The two that fire every hunt tick stay behind `debug`.
+// huntChatter is the supplicant events that fire once per hunt tick whether or
+// not anything has happened, and scanRepeat is how often one is allowed through
+// while it keeps repeating. 30 s keeps a visible heartbeat in the debug log at
+// 1% of the volume.
+var huntChatter = []string{
+	"CTRL-EVENT-SCAN-RESULTS",
+	"CTRL-EVENT-SCAN-STARTED",
+	"CTRL-EVENT-NETWORK-NOT-FOUND",
+}
+
+const scanRepeat = 30 * time.Second
+
 func (d *daemon) logWPA(e string) {
 	e = strings.TrimSpace(e)
 	if e == "" {
 		return
 	}
 	// These three fire on every hunt tick, once a second: NETWORK-NOT-FOUND
-	// alone was 90% of a drive's log volume.
-	if strings.HasPrefix(e, "CTRL-EVENT-SCAN-RESULTS") || strings.HasPrefix(e, "CTRL-EVENT-SCAN-STARTED") ||
-		strings.HasPrefix(e, "CTRL-EVENT-NETWORK-NOT-FOUND") {
-		d.dbg("wpa", d.label, e)
-		return
+	// alone was 90% of a drive's log volume. Even demoted to debug they are
+	// three lines a second for as long as both cars are switched off, which is
+	// most of the box's life, so they repeat on a timer and carry the count of
+	// what was suppressed. Any event that is not one of these three is a thing
+	// that actually happened and is never rate-limited.
+	for _, p := range huntChatter {
+		if strings.HasPrefix(e, p) {
+			if d.wpaLast == nil { // a daemon built without buildLinks, i.e. a test
+				d.wpaLast, d.wpaSame = map[string]time.Time{}, map[string]int{}
+			}
+			n := d.wpaSame[p] + 1
+			if now := time.Now(); now.Sub(d.wpaLast[p]) >= scanRepeat {
+				if n > 1 {
+					d.dbg("wpa", d.label, e, fmt.Sprintf("x%d_since_last", n))
+				} else {
+					d.dbg("wpa", d.label, e)
+				}
+				d.wpaLast[p], d.wpaSame[p] = now, 0
+			} else {
+				d.wpaSame[p] = n
+			}
+			return
+		}
 	}
 	d.linkEv("wpa", e)
 }
@@ -378,6 +416,41 @@ func (d *daemon) hunt() {
 	d.cmd.cmd("SCAN freq=" + tickFreqs(d.cfg.Cars, d.huntTick)) // FAIL-BUSY just means a scan is already running
 }
 
+// Every BSS in the scan, not just the configured cars: a car that is on
+// but unseen, or on a channel we do not hunt, looks identical to a car
+// that is off unless the whole scan is on record.
+//
+// Which BSSIDs were seen, not their signal: hunting scans once a second, and
+// logging the RSSI of the neighbours' APs would rewrite the same two lines
+// forever at about 3 lines a second. An empty garage is the case this box
+// spends most of its life in, and it is the one case where the detail is
+// worthless. A change in the set still logs immediately, and the periodic
+// repeat keeps the log honest about the gap.
+//
+// Split out of onScanResults so the rate limiting is testable without a
+// wpa_supplicant socket.
+func (d *daemon) logScan(seen []scanEntry, now time.Time) {
+	if !d.cfg.Debug {
+		return
+	}
+	args := []string{"n=" + strconv.Itoa(len(seen))}
+	var key strings.Builder
+	for _, e := range seen {
+		args = append(args, fmt.Sprintf("%s/%d/%d/%q", e.BSSID, e.Freq, e.Signal, e.SSID))
+		key.WriteString(e.BSSID)
+		key.WriteByte(' ')
+	}
+	if k := key.String(); k != d.lastScanKey || now.Sub(d.lastScanLog) >= scanRepeat {
+		if k == d.lastScanKey && d.scanSame > 0 {
+			args = append(args, "unchanged_for="+strconv.Itoa(d.scanSame)+"_scans")
+		}
+		d.dbg("scan", args...)
+		d.lastScanKey, d.lastScanLog, d.scanSame = k, now, 0
+	} else {
+		d.scanSame++
+	}
+}
+
 func (d *daemon) onScanResults() {
 	r, err := d.cmd.cmd("SCAN_RESULTS")
 	if err != nil {
@@ -392,16 +465,7 @@ func (d *daemon) onScanResults() {
 		d.recoverRadio()
 		return
 	}
-	// Every BSS in the scan, not just the configured cars: a car that is on
-	// but unseen, or on a channel we do not hunt, looks identical to a car
-	// that is off unless the whole scan is on record.
-	if d.cfg.Debug {
-		args := []string{"n=" + strconv.Itoa(len(seen))}
-		for _, e := range seen {
-			args = append(args, fmt.Sprintf("%s/%d/%d/%q", e.BSSID, e.Freq, e.Signal, e.SSID))
-		}
-		d.dbg("scan", args...)
-	}
+	d.logScan(seen, now)
 	for _, c := range d.cfg.Cars {
 		if e, found := best(c, seen); found {
 			if _, ok := d.firstSeen[c.ID]; !ok {

@@ -78,6 +78,9 @@ for c in carplayd carrecon carnetbridge; do
 done
 
 cd out
-sha256sum ./*-linux-* > SHA256SUMS
+# Release artifacts only. The test binaries live here too (testbin) and are not
+# part of a release; listing them in the manifest would make it ambiguous which
+# of these is the thing that gets deployed.
+sha256sum $(ls ./*-linux-* | grep -v '\.test-linux-') > SHA256SUMS
 echo
 cat SHA256SUMS
