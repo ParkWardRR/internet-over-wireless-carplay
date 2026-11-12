@@ -244,7 +244,12 @@ func (ps *profiles) Derive(c Car) (Car, bool) {
 }
 
 // Snapshot is what the decide trace reports about a car's learned band.
+// A nil receiver reports "nothing learned": the decide trace runs on every
+// poll, so it must not depend on learning being configured at all.
 func (ps *profiles) Snapshot(id string) (n int, mean, sd float64, ready bool) {
+	if ps == nil {
+		return 0, 0, 0, false
+	}
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	p := ps.get(id)

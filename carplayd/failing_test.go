@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,22 +35,19 @@ func TestFailingLeaveCatchesTheFlatSignalDeparture(t *testing.T) {
 		now := start.Add(time.Duration(i) * time.Second)
 		d.readFail(map[string]string{"tx_failed": itoa(s.txFailed)}, now)
 
-		// the two signal rules, exactly as poll() runs them
-		d.samples = append(trimSamples(d.samples, now), sample{now, s.sig})
-		var leave, trend bool
-		d.below, leave = leaveCheck(d.below, now, s.sig, car.Leave, cfg.LeaveFor)
-		if base, ok := baselineOf(d.samples, now); ok {
-			d.belowTrend, trend = leaveCheck(d.belowTrend, now, s.sig, base-car.Drop, cfg.LeaveFor)
-		}
-		if leave || trend {
-			t.Fatalf("sample %d (sig %d): a signal rule fired on the real trace; "+
-				"it did not on the car, so the test data or the rules changed", i, s.sig)
-		}
-
-		var failing bool
-		d.belowFail, failing = sustain(d.belowFail, now, d.failPerSec >= car.FailRate, cfg.LeaveFor)
-		if failing && firedAt < 0 {
-			firedAt = i
+		// The real decision, not a copy of it. An earlier version of this test
+		// re-implemented the three rules inline, which meant it kept passing
+		// while the rules in poll() drifted away from what it was checking.
+		dec := d.decideLeave(s.sig, now)
+		switch {
+		case dec.why == "":
+		case strings.HasPrefix(dec.why, "failing"):
+			if firedAt < 0 {
+				firedAt = i
+			}
+		default:
+			t.Fatalf("sample %d (sig %d): a signal rule fired on the real trace (%q); "+
+				"it did not on the car, so the test data or the rules changed", i, s.sig, dec.why)
 		}
 	}
 	if firedAt < 0 {
@@ -77,10 +75,8 @@ func TestFailingLeaveQuietOnHealthyLink(t *testing.T) {
 		}
 		now := start.Add(time.Duration(i) * time.Second)
 		d.readFail(map[string]string{"tx_failed": itoa(fails)}, now)
-		var failing bool
-		d.belowFail, failing = sustain(d.belowFail, now, d.failPerSec >= car.FailRate, cfg.LeaveFor)
-		if failing {
-			t.Fatalf("fired on a healthy link at sample %d (rate %d/s)", i, d.failPerSec)
+		if dec := d.decideLeave(-70, now); dec.why != "" {
+			t.Fatalf("fired on a healthy link at sample %d (rate %d/s): %s", i, d.failPerSec, dec.why)
 		}
 	}
 }

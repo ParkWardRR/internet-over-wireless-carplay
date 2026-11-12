@@ -587,6 +587,81 @@ func (d *daemon) resetFail() {
 	d.failSamples, d.failPerSec, d.belowFail = nil, 0, time.Time{}
 }
 
+// leaveDecision is what one poll concluded. A zero value means stay.
+type leaveDecision struct {
+	why string // the reason logged on the leave event; "" = do not leave
+	// rejoinFloor, when non-zero, is the signal the car has to come back to
+	// before it may be rejoined -- set only by the trend rule, which fires while
+	// the absolute thresholds still look fine.
+	rejoinFloor int
+}
+
+// decideLeave runs the three leave rules and emits the per-poll trace, and is
+// the ONLY place the effective car is chosen. It derives that car itself rather
+// than taking it as an argument: an earlier version left the choice to the
+// caller, the caller passed the configured car instead of the learned one, and
+// the box spent an evening collecting samples that changed no decision.
+//
+// Returns a zero decision to stay put.
+func (d *daemon) decideLeave(sig int, now time.Time) (dec leaveDecision) {
+	var base int
+	// The effective car: learned thresholds where they have converged, the
+	// configured ones until then. Every rule below reads `sc`, never
+	// d.serving, or learning would collect samples and change nothing -- which
+	// is exactly what happened when an earlier edit to this block was lost.
+	sc := d.learned(*d.serving)
+	d.samples = append(trimSamples(d.samples, now), sample{now, sig})
+	var leave, trend bool
+	d.below, leave = leaveCheck(d.below, now, sig, sc.Leave, d.cfg.LeaveFor)
+	base, haveBase := baselineOf(d.samples, now)
+	if sc.Drop > 0 && haveBase {
+		d.belowTrend, trend = leaveCheck(d.belowTrend, now, sig, base-sc.Drop, d.cfg.LeaveFor)
+	}
+	// Leave while the link is still alive enough to say goodbye. Neither signal
+	// rule catches a departure where the RSSI stays flat and the link simply
+	// dies -- measured on a real drive: 35 s at a steady -82 with the trend
+	// baseline tracking it, then death, no goodbye, and a phone left holding a
+	// dead route. tx_failed rising is the only advance warning, and it gave
+	// about 8 s of it.
+	var failing bool
+	if sc.FailRate > 0 {
+		d.belowFail, failing = sustain(d.belowFail, now, d.failPerSec >= sc.FailRate, d.cfg.LeaveFor)
+	}
+	// The whole leave decision, every poll: which threshold is in play, how
+	// long the signal has sat under it, and what the trend baseline makes of
+	// it. A departure that the box got wrong is otherwise only visible as the
+	// single leave line that did or did not happen.
+	lpN, lpMean, lpSD, lpReady := d.prof.Snapshot(d.serving.ID)
+	trace := []string{d.serving.ID, strconv.Itoa(sig),
+		"leave=" + strconv.Itoa(sc.Leave), "below_for=" + since(d.below, now),
+		"drop=" + strconv.Itoa(sc.Drop), "samples=" + strconv.Itoa(len(d.samples)),
+		fmt.Sprintf("learned=%t n=%d band=%.1f/%.1f join=%d rejoin=%d",
+			lpReady, lpN, lpMean, lpSD, sc.Join, sc.Rejoin)}
+	if haveBase {
+		trace = append(trace, "base="+strconv.Itoa(base),
+			"trend_leave="+strconv.Itoa(base-sc.Drop), "trend_below_for="+since(d.belowTrend, now))
+	} else {
+		trace = append(trace, "base=none")
+	}
+	trace = append(trace, "leave_for="+d.cfg.LeaveFor.String(),
+		fmt.Sprintf("fail=%d/s fail_rate=%d fail_for=%s", d.failPerSec, sc.FailRate, since(d.belowFail, now)),
+		fmt.Sprintf("fire_threshold=%t fire_trend=%t fire_failing=%t", leave, trend, failing))
+	d.dbg("decide", trace...)
+
+	switch {
+	case leave:
+		return leaveDecision{why: "threshold"}
+	case trend:
+		// Rejoin only near the parked level: the absolute rejoin threshold may be
+		// weaker than where we just left, which would mean join, leave, join
+		// while driving off. A dip while parked still recovers there.
+		return leaveDecision{why: "trend base=" + strconv.Itoa(base), rejoinFloor: max(base-3, sc.Join)}
+	case failing:
+		return leaveDecision{why: "failing tx_failed=" + strconv.Itoa(d.failPerSec) + "/s"}
+	}
+	return leaveDecision{}
+}
+
 func (d *daemon) poll() {
 	if d.serving == nil {
 		return
@@ -644,60 +719,15 @@ func (d *daemon) poll() {
 	// (drop > 0) well below where the signal sat 5-20 s ago, i.e. driving off.
 	// A box hanging on at the edge of range makes the head unit relay the
 	// phone's traffic to it at the slowest rates, starving CarPlay itself.
-	d.samples = append(trimSamples(d.samples, now), sample{now, sig})
-	var leave, trend bool
-	d.below, leave = leaveCheck(d.below, now, sig, d.serving.Leave, d.cfg.LeaveFor)
-	base, haveBase := baselineOf(d.samples, now)
-	if d.serving.Drop > 0 && haveBase {
-		d.belowTrend, trend = leaveCheck(d.belowTrend, now, sig, base-d.serving.Drop, d.cfg.LeaveFor)
-	}
-	// Leave while the link is still alive enough to say goodbye. Neither signal
-	// rule catches a departure where the RSSI stays flat and the link simply
-	// dies -- measured on a real drive: 35 s at a steady -82 with the trend
-	// baseline tracking it, then death, no goodbye, and a phone left holding a
-	// dead route. tx_failed rising is the only advance warning, and it gave
-	// about 8 s of it.
-	var failing bool
-	if d.serving.FailRate > 0 {
-		d.belowFail, failing = sustain(d.belowFail, now, d.failPerSec >= d.serving.FailRate, d.cfg.LeaveFor)
-	}
-	// The whole leave decision, every poll: which threshold is in play, how
-	// long the signal has sat under it, and what the trend baseline makes of
-	// it. A departure that the box got wrong is otherwise only visible as the
-	// single leave line that did or did not happen.
-	trace := []string{d.serving.ID, strconv.Itoa(sig),
-		"leave=" + strconv.Itoa(d.serving.Leave), "below_for=" + since(d.below, now),
-		"drop=" + strconv.Itoa(d.serving.Drop), "samples=" + strconv.Itoa(len(d.samples))}
-	if haveBase {
-		trace = append(trace, "base="+strconv.Itoa(base),
-			"trend_leave="+strconv.Itoa(base-d.serving.Drop), "trend_below_for="+since(d.belowTrend, now))
-	} else {
-		trace = append(trace, "base=none")
-	}
-	trace = append(trace, "leave_for="+d.cfg.LeaveFor.String(),
-		fmt.Sprintf("fail=%d/s fail_rate=%d fail_for=%s", d.failPerSec, d.serving.FailRate, since(d.belowFail, now)),
-		fmt.Sprintf("fire_threshold=%t fire_trend=%t fire_failing=%t", leave, trend, failing))
-	d.dbg("decide", trace...)
-	if leave || trend || failing {
+	if dec := d.decideLeave(sig, now); dec.why != "" {
 		car := d.serving
-		why := "threshold"
-		switch {
-		case leave:
-		case trend:
-			why = "trend base=" + strconv.Itoa(base)
-		default:
-			why = "failing tx_failed=" + strconv.Itoa(d.failPerSec) + "/s"
-		}
-		d.ev("leave", car.ID, strconv.Itoa(sig), why)
+		d.ev("leave", car.ID, strconv.Itoa(sig), dec.why)
 		d.m.inc("leaves")
 		d.leftAt[car.ID] = now // no rejoin for cfg.RejoinAfter, whatever the signal does
 		d.stopServing(true)
 		d.held[car.ID] = true
-		if trend && !leave {
-			// Rejoin only near the parked level: the absolute rejoin threshold
-			// may be weaker than where we just left, which would mean join,
-			// leave, join while driving off. A dip while parked recovers there.
-			d.relaxed[car.ID] = max(base-3, car.Join)
+		if dec.rejoinFloor != 0 {
+			d.relaxed[car.ID] = dec.rejoinFloor
 		}
 		// One disconnect request, not two. Measured on the F22 departure: the
 		// leave path produced 8 distinct disassoc frames, each retried 7 times

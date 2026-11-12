@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // feed plays n healthy polls with RSSI drawn around mean/sd.
@@ -168,5 +169,75 @@ func TestProfilesPersistAndTolerateGarbage(t *testing.T) {
 	}
 	if got := loadProfiles(filepath.Join(dir, "missing.json")); got.Cars == nil {
 		t.Error("missing state file produced an unusable result")
+	}
+}
+
+// Learning must reach the LEAVE decision, not just join and rejoin.
+//
+// This exists because it did not. An edit wiring the learned car into the leave
+// block was lost before it was ever committed -- `git log -S` finds it in no
+// commit -- so for a whole evening the box collected 141 healthy samples,
+// persisted them, used them for join/rejoin, and then made every leave decision
+// against the configured thresholds. Nothing failed, no test went red, and the
+// one trace field that would have shown it was lost in the same incident.
+//
+// The check is behavioural: feed decideLeave a signal that the CONFIGURED
+// thresholds call fine and the LEARNED ones call a departure, and require the
+// departure. Asserting on d.learned() alone would not have caught it -- that
+// function was never broken; its caller simply did not exist.
+func TestLearnedThresholdsReachTheLeaveDecision(t *testing.T) {
+	// A link that lives around -60 dBm, configured for a far weaker one. Drop
+	// and FailRate are off so only the absolute threshold can fire.
+	configured := Car{ID: "A", Join: -80, Leave: -85, Rejoin: -77}
+	cfg := defaultConfig()
+	cfg.Learn = true
+	cfg.LeaveFor = 2 * time.Second
+	cfg.Cars = []Car{configured}
+
+	d := &daemon{cfg: cfg, serving: &configured, prof: newProfiles(""), m: newMetrics()}
+	rng := rand.New(rand.NewSource(11))
+	for i := 0; i < 600; i++ {
+		d.prof.Observe("A", int(-60+rng.NormFloat64()*2), 0, true)
+	}
+
+	sc := d.learned(configured)
+	if sc.Leave <= configured.Leave {
+		t.Fatalf("learned leave %d did not move above the configured %d for a -60 dBm link; "+
+			"the rest of this test proves nothing", sc.Leave, configured.Leave)
+	}
+	// Pick a signal strictly between the two thresholds, so the two answers
+	// cannot be confused: weak for this link, fine by the configuration.
+	sig := (sc.Leave + configured.Leave) / 2
+	if !(sig < sc.Leave && sig > configured.Leave) {
+		t.Fatalf("test setup: %d does not sit between learned %d and configured %d",
+			sig, sc.Leave, configured.Leave)
+	}
+
+	start := time.Now()
+	var why string
+	for i := 0; i < 10 && why == ""; i++ {
+		why = d.decideLeave(sig, start.Add(time.Duration(i)*time.Second)).why
+	}
+	if why == "" {
+		t.Errorf("at %d dBm the box stayed put: learned leave is %d, so the decision is still "+
+			"using the configured %d", sig, sc.Leave, configured.Leave)
+	}
+
+	// The pick path and the leave path must agree on the same car, or a box can
+	// join on one set of numbers and leave on another.
+	if pickSide := d.learnedCars()[0]; pickSide != sc {
+		t.Errorf("join path sees %+v but leave path sees %+v", pickSide, sc)
+	}
+
+	// With learning off, the same signal is fine again and nothing is substituted.
+	d.cfg.Learn = false
+	if off := d.learned(configured); off != configured {
+		t.Fatalf("learn=off still substituted: %+v", off)
+	}
+	d.below, d.belowTrend, d.belowFail = time.Time{}, time.Time{}, time.Time{}
+	for i := 0; i < 10; i++ {
+		if w := d.decideLeave(sig, start.Add(time.Duration(20+i)*time.Second)).why; w != "" {
+			t.Errorf("learn=off left at %d dBm with a -85 configured threshold: %s", sig, w)
+		}
 	}
 }
