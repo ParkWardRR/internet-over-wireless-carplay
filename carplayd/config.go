@@ -23,6 +23,7 @@ type Car struct {
 	Rejoin   int          // dBm: after leaving, rejoin only at least this strong
 	Priority int          // higher wins when both cars are seen
 	Drop     int          // dB: also leave when the signal falls this far below where it sat 5-20 s ago (0 = off)
+	FailRate int          // tx_failed increments per second that mean the link is dying (0 = off)
 }
 
 // Freq returns the 2.4 GHz centre frequency in MHz, or 0 when the channel is
@@ -77,8 +78,12 @@ func defaultConfig() Config {
 	}
 }
 
+// defaultCar's fail_rate is on by default: a departure where the signal stays
+// flat and the link simply dies is invisible to both signal rules, and that is
+// the case that strands a phone with a dead route (docs/test-log.md,
+// 2026-11-11). 5/s is well clear of the 0-2/s seen on a healthy link.
 func defaultCar(id string) Car {
-	return Car{ID: id, Channel: 11, Join: -80, Leave: -84, Rejoin: -76}
+	return Car{ID: id, Channel: 11, Join: -80, Leave: -84, Rejoin: -76, FailRate: 5}
 }
 
 // parseConfig reads an INI-style file:
@@ -287,6 +292,11 @@ func setCar(c *Car, k, v string) error {
 		c.Priority = atoi(v)
 	case "drop":
 		c.Drop = atoi(v)
+	case "fail_rate":
+		c.FailRate = atoi(v)
+		if err == nil && c.FailRate < 0 {
+			err = fmt.Errorf("fail_rate must be >= 0 (0 = off)")
+		}
 	default:
 		return fmt.Errorf("unknown car key %q", k)
 	}

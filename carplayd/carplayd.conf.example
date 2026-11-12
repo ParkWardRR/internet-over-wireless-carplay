@@ -76,6 +76,13 @@ priority = 1
 #join = -80
 #leave = -84
 #rejoin = -76
+# fail_rate (default 5, 0 = off): leave when the driver's tx_failed counter
+# rises this fast, averaged over 5 s. A departure where the signal stays flat
+# and the link simply dies is invisible to both signal rules -- measured on a
+# real drive: 35 s at a steady -82 dBm with the trend baseline tracking it, then
+# death with no goodbye and a phone left holding a dead route. tx_failed was the
+# only advance warning and gave about 8 s of it. A healthy link sits at 0-2/s.
+#fail_rate = 5
 
 [car B]
 ssid = BMW00002 CarPlay

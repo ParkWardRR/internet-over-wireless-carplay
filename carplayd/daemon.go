@@ -33,6 +33,9 @@ type daemon struct {
 	lastSurvey   map[string]time.Time // last sighting/signal logged per car (survey)
 	samples      []sample             // signal polls of the served car, last 25 s
 	belowTrend   time.Time
+	failSamples  []failSample // tx_failed readings, last failWindow
+	failPerSec   int          // its rise per second across that window
+	belowFail    time.Time    // since when failPerSec has been at or over the car's fail_rate
 	relaxed      map[string]int // rejoin threshold after a trend leave: near the parked level
 	huntTick     int
 	phones       int
@@ -80,7 +83,10 @@ func (d *daemon) logWPA(e string) {
 	if e == "" {
 		return
 	}
-	if strings.HasPrefix(e, "CTRL-EVENT-SCAN-RESULTS") || strings.HasPrefix(e, "CTRL-EVENT-SCAN-STARTED") {
+	// These three fire on every hunt tick, once a second: NETWORK-NOT-FOUND
+	// alone was 90% of a drive's log volume.
+	if strings.HasPrefix(e, "CTRL-EVENT-SCAN-RESULTS") || strings.HasPrefix(e, "CTRL-EVENT-SCAN-STARTED") ||
+		strings.HasPrefix(e, "CTRL-EVENT-NETWORK-NOT-FOUND") {
 		d.dbg("wpa", e)
 		return
 	}
@@ -450,6 +456,7 @@ func (d *daemon) startServing(car *Car) {
 		return
 	}
 	d.serving, d.ra, d.below, d.belowTrend, d.samples = car, ra, time.Time{}, time.Time{}, nil
+	d.resetFail() // the new station's counters start from their own zero
 	d.servingSince, d.lastPhone, d.phones = time.Now(), time.Time{}, 0
 	d.m.set(func(m *metrics) { m.serving, m.phones = car.ID, 0 })
 	ra.start(!d.up.ok)
@@ -474,6 +481,35 @@ func (d *daemon) stopServing(goodbye bool) {
 	d.m.set(func(m *metrics) { m.serving, m.phones = "", 0 })
 }
 
+// readFail updates the tx_failed rate from a station dump. A missing counter
+// leaves the rate untouched rather than reading as zero, so one failed `iw`
+// call cannot clear a failing link's evidence.
+func (d *daemon) readFail(link map[string]string, now time.Time) {
+	v, ok := link["tx_failed"]
+	if !ok {
+		return
+	}
+	cur, err := strconv.Atoi(v)
+	if err != nil {
+		return
+	}
+	// A station that re-associated restarts its counters; start over rather
+	// than read the step down as a negative rate.
+	if n := len(d.failSamples); n > 0 && cur < d.failSamples[n-1].n {
+		d.failSamples = nil
+	}
+	d.failSamples = append(trimFail(d.failSamples, now), failSample{now, cur})
+	if r, ok := failRateOf(d.failSamples); ok {
+		d.failPerSec = r
+	}
+}
+
+// resetFail forgets the tx_failed history, so a new link's counters are never
+// compared against the previous one's.
+func (d *daemon) resetFail() {
+	d.failSamples, d.failPerSec, d.belowFail = nil, 0, time.Time{}
+}
+
 func (d *daemon) poll() {
 	if d.serving == nil {
 		return
@@ -495,20 +531,29 @@ func (d *daemon) poll() {
 			d.lastPhone = now
 		}
 		d.m.set(func(m *metrics) { m.signal, m.phones = sig, n })
-		if surveyDue(d.lastSurvey[d.serving.ID], now, d.cfg.Survey) {
-			args := []string{d.serving.ID, strconv.Itoa(sig), "phones=" + strconv.Itoa(n)}
+		// The station dump feeds both the survey line and the failing-link
+		// rule, so it is read every poll whenever either wants it.
+		surveying := surveyDue(d.lastSurvey[d.serving.ID], now, d.cfg.Survey)
+		var link map[string]string
+		if surveying || d.serving.FailRate > 0 {
 			if st, err := exec.Command("iw", "dev", d.cfg.STA, "station", "dump").Output(); err == nil {
-				link := iwStation(string(st))
-				for _, k := range linkFields {
-					if v, ok := link[k]; ok {
-						args = append(args, k+"="+v)
-					}
+				link = iwStation(string(st))
+				if surveying {
+					d.dbg("station", strings.Fields(strings.ReplaceAll(string(st), "\n", " "))...)
 				}
-				d.dbg("station", strings.Fields(strings.ReplaceAll(string(st), "\n", " "))...)
+			}
+		}
+		if surveying {
+			args := []string{d.serving.ID, strconv.Itoa(sig), "phones=" + strconv.Itoa(n)}
+			for _, k := range linkFields {
+				if v, ok := link[k]; ok {
+					args = append(args, k+"="+v)
+				}
 			}
 			d.ev("signal", args...)
 			d.lastSurvey[d.serving.ID] = now
 		}
+		d.readFail(link, now)
 		d.dbg("neigh", d.serving.ID, strings.Join(strings.Fields(strings.ReplaceAll(string(out), "\n", " | ")), " "))
 	}
 	// Leave while the link is still usable: below the absolute threshold, or
@@ -521,6 +566,16 @@ func (d *daemon) poll() {
 	base, haveBase := baselineOf(d.samples, now)
 	if d.serving.Drop > 0 && haveBase {
 		d.belowTrend, trend = leaveCheck(d.belowTrend, now, sig, base-d.serving.Drop, d.cfg.LeaveFor)
+	}
+	// Leave while the link is still alive enough to say goodbye. Neither signal
+	// rule catches a departure where the RSSI stays flat and the link simply
+	// dies -- measured on a real drive: 35 s at a steady -82 with the trend
+	// baseline tracking it, then death, no goodbye, and a phone left holding a
+	// dead route. tx_failed rising is the only advance warning, and it gave
+	// about 8 s of it.
+	var failing bool
+	if d.serving.FailRate > 0 {
+		d.belowFail, failing = sustain(d.belowFail, now, d.failPerSec >= d.serving.FailRate, d.cfg.LeaveFor)
 	}
 	// The whole leave decision, every poll: which threshold is in play, how
 	// long the signal has sat under it, and what the trend baseline makes of
@@ -536,13 +591,18 @@ func (d *daemon) poll() {
 		trace = append(trace, "base=none")
 	}
 	trace = append(trace, "leave_for="+d.cfg.LeaveFor.String(),
-		fmt.Sprintf("fire_threshold=%t fire_trend=%t", leave, trend))
+		fmt.Sprintf("fail=%d/s fail_rate=%d fail_for=%s", d.failPerSec, d.serving.FailRate, since(d.belowFail, now)),
+		fmt.Sprintf("fire_threshold=%t fire_trend=%t fire_failing=%t", leave, trend, failing))
 	d.dbg("decide", trace...)
-	if leave || trend {
+	if leave || trend || failing {
 		car := d.serving
 		why := "threshold"
-		if !leave {
+		switch {
+		case leave:
+		case trend:
 			why = "trend base=" + strconv.Itoa(base)
+		default:
+			why = "failing tx_failed=" + strconv.Itoa(d.failPerSec) + "/s"
 		}
 		d.ev("leave", car.ID, strconv.Itoa(sig), why)
 		d.m.inc("leaves")
