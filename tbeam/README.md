@@ -113,62 +113,61 @@ first and restore it afterwards — see `tbeam-supreme-firmware-handoff.md`.
 | OLED (SH1106) | ✅ renders (bezel insets respected) |
 | IMU (QMI8658) | ❌ does not answer on CS 34 — see below |
 
-### The IMU, and what has been ruled out
+### The IMU: what is actually established, and what is not
 
-`WHO_AM_I` reads a constant **`0x3E`**. The authoritative record of this is
-§9.1 of `tbeam-supreme-firmware-handoff.md`, which goes further than this build
-did — it also rules out 500 kHz and 4 MHz clocks, a dummy byte between address
-and data, and an ALDO2 power cycle, and records the telling detail that the
-returned byte is **address-dependent** (`0x00`–`0x07` read `0x3E`, `0x0F` and
-`0x30`–`0x37` read `0x00`), so the bus is not dead.
+`WHO_AM_I` reads a constant **`0x3E`**. The authoritative record is §9.1 of
+`tbeam-supreme-firmware-handoff.md`. Three claims this file previously made were
+wrong, and are corrected here rather than softened:
 
-What this build confirmed independently, and the one thing it added:
+| Previous claim | Why it was wrong |
+|---|---|
+| "Mode 0 and mode 3 return the identical byte, and a wrong mode would give different garbage" | **The QMI8658 supports both mode 0 and mode 3** (datasheet: "SPI (3-wire or 4-wire modes)"). Identical results across them is *expected* and diagnostic of nothing. |
+| "An I2C scan rules out I2C strapping" | The scan covered the board's normal I2C buses (17/18 and 42/41). The SPI-connected IMU's data and clock are **GPIO 35 and 36**. Wrong pins; it tested nothing about the IMU. |
+| "Power ruled out: ALDO2 reads 3300 mV" | That is the PMU's *programmed setting*. The QMI8658 has **separate VDD (pin 8) and VDDIO (pin 5)** supplies, 1.71–3.6 V each, and neither was measured at the chip. |
 
-1. **Power** — ALDO2, the sensor rail, reads `on 3300mV` from the PMU.
-2. **Bus contention with the card** — the IMU is probed before the card is ever
-   mounted, with `SD_CS` driven high.
-3. **SPI clock mode** — mode 0 and mode 3 both return the *identical* `0x3E`. A
-   QMI8658 clocked in the wrong mode returns different garbage per mode.
-4. **The driver** — a hand-rolled transaction and, *new here*, SensorLib's
-   `SensorQMI8658::begin(SPIClass&, csPin)` — the driver LilyGO's own example
-   uses, handed the already-begun SD SPI instance and CS 34 — **returns false**.
-   That closes the "just use the official driver" avenue.
-5. **I2C strapping** — a scan of both buses finds `0x3C 0x77 0x7C` and
-   `0x34 0x51`. Nothing at 0x6A/0x6B, so it is not an I2C part here.
+"The vendor example fails, therefore it is not firmware" is also too strong. It
+removes an application-specific bug as the explanation; it does not verify build
+configuration, library versions, initialisation timing, or that signals reach the
+part.
 
-**What this does and does not establish.** A byte that is not `0x05` means this
-code did not identify a QMI8658 — it is not a connectivity test, and it does not
-show that GPIO 34 is disconnected or that the part is dead. GPIO 34 *is* the
-documented IMU chip-select on the Supreme. An earlier version of this file
-claimed "CS 34 does not reach a QMI8658"; that was an overclaim from a failed
-register comparison and has been withdrawn.
+**The defensible conclusion is narrower: the fault reproduces outside this
+application, and the boundary between board configuration and hardware has not
+been established.**
 
-**The vendor baseline was then run, and it fails too.** LilyGO's own
-`QMI8658_GetDataExample`, unmodified, with its own `setupBoards()` and
-`SPIClass SDCardSPI(HSPI)`, built for `T_BEAM_S3_SUPREME_SX1262` and flashed to
-this board:
+### Two datasheet-conformance faults, now testable
 
-```
-UBlox GNSS init succeeded, using UBlox GNSS Module      <- board init worked
-Switching RTC Source to 32.768Khz succeeded
-[E][SensorQMI8658.hpp:385] reset(): Reset chip failed, Response val = 0 - 0x0
-Failed to find QMI8658 - check your wiring!
-```
+Reading the QMI8658C datasheet turned up two things *both* this firmware and
+LilyGO's example get wrong:
 
-The vendor's initialisation demonstrably ran: the GNSS and the RTC both came up
-in the same boot. Only the IMU fails, and it fails inside SensorLib's own
-`reset()`, with the reset-result register reading 0 — the same thing a
-hand-rolled driver sees. That is the test LilyGO's support process asks for
-(issue #255) before concluding anything about the hardware, and it rules out
-this firmware as the cause.
+1. **System Turn On Time is 1.75 s**, and note 7 says it "starts once VDDIO and
+   VDD are within 1% of Final Value". Both codebases probe within a few hundred
+   milliseconds of enabling the sensor rail — roughly 35× inside spec.
+2. **CS is the interface selector.** Pin 12: *"I2C/I3C/SPI-UI selection Pin.
+   (If 1: I2C-UI Mode: I2C/I3C communication enabled, SPI idle mode)"*. Every
+   attempt so far let CS idle high through power-up.
 
-It also rules out one thing that looked promising: this firmware originally
-declared its peripheral bus as `SPIClass(FSPI)` while LilyGO uses `HSPI`, and on
-the ESP32-S3 the global `SPI` object is FSPI. Switching to HSPI changed nothing.
+`tbeam/imuprobe/` tests exactly those, **read-only** — no soft reset, no CTRL
+writes, because a write to a part that is not answering only adds a variable:
 
-Note that the chip id this firmware prints is SensorLib's `getChipID()`, which
-reads the revision register and *cannot* identify the part; `WHO_AM_I` at
-register `0x00` is the only byte that can, and it is what the probe reports.
+- **A** control: read with the rail long since up
+- **B** power-cycle the rail with CS idling high, wait past 1.75 s, read for 10 s
+- **C** power-cycle the rail with CS held **low** through power-up, then read
+
+If every line still reads `0x3E`, both hypotheses are eliminated and the next
+steps are physical: measure VDD and VDDIO at the chip's decoupling capacitors,
+and capture CS 34 / SCK 36 / MOSI 35 / MISO 37 during one register-0 read.
+
+### Identifying the board revision in five seconds
+
+LilyGO's own docs give a physical cue needing no tools: **the PPS LED is blue on
+V3.0 and red on V3.1.** V3.1 also adds silkscreen to the back of the PCB. The
+documented V3.1 changes are the QMC6309 magnetometer, an onboard BMS, BME280 and
+OLED address-selection resistors, and that silkscreen — **no IMU change is
+documented**, which weakens "a different part on that select line". This board's
+`0x7C` magnetometer is the QMC6309, so V3.1 is likely.
+
+Schematics: `schematic/T-Beam-S3-Supreme/T-Beam-S3-Supreme-V3.0.pdf` and
+`-V3.1.pdf` in the LilyGo-LoRa-Series repo.
 
 The firmware reports this rather than hiding it: the MOTION page and the status
 line both print both probe bytes and the conclusion, so the diagnosis travels
