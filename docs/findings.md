@@ -100,11 +100,21 @@ jump is *demand*. Estimated occupancy was ~2.4 % box against ~3.8 % CarPlay,
 nowhere near saturation. [Heusse et al.](https://infocom2003.ieee-infocom.org/papers/21_01.PDF)
 still describes a real effect, but it does not appear to be what breaks CarPlay here.
 
-**CarPlay did not drop on either car, with the box on.** Two drives, same route,
-both cars, no drop — confirmed by the owner and corroborated independently by the
-in-car recorder (the phone→head-unit rate's per-second minimum never fell below
-160 kB/s through a departure). The original "drops on every departure" is not
-reproducing. Personal Hotspot, the other obvious candidate, is never on.
+**CarPlay did not drop on either car, with the box on.** Three drives — the same
+short lap on each car, then a long one with stops — no drop, confirmed by the
+owner and corroborated independently by the in-car recorder (the phone→head-unit
+rate's per-second minimum never fell below 160 kB/s through a departure). The
+original "drops on every departure" is not reproducing. Personal Hotspot, the
+other obvious candidate, is never on.
+
+**The trend rule defeats itself on a slow fade.** The 19:01 road departure is the
+clearest example yet of why. The trend rule fires when the signal sits `drop` dB
+under a baseline taken from 5–20 s ago, and it got to **1.9 s of the required
+2 s** — then its own baseline decayed from −77 to −78, the gap closed, and the
+timer reset. A rule whose threshold follows the thing it measures cannot catch
+anything slower than its own window; it only ever catches a cliff. `fail_rate`
+fired instead, and the goodbye went out **0.74 s** later. Of the three leave
+rules, the one built on signal strength has still never been the one that worked.
 
 **One real cost remains, and it is ours.** Every leave emits a burst of disassoc
 frames the head unit never ACKs: 5–8 distinct frames, each retried 7 times by the
@@ -123,13 +133,49 @@ CarPlay share one BSS and one AP radio, not merely one channel. The head unit
 advertises **no BSS Load element**, so there is no channel-utilisation figure to
 read; airtime has to be computed from the capture.
 
+### Learned thresholds
+
+Since every dBm number above is a property of one basement and one pair of
+dongles, carplayd does not take them from the config file except as a cold-start
+fallback. Each car gets a profile of how its own link behaves when it is working:
+a decaying mean and variance of RSSI over healthy polls only, plus the same for
+`tx_failed`. Join, rejoin and leave are derived from that band, `fail_rate` only
+ever rises from the configured floor, and all of it is clamped to −95…−30 dBm.
+
+Three things it has to get right, each learned the hard way:
+
+- **Only healthy polls teach it.** A dying link would otherwise teach the profile
+  that dying is normal, and the measured bimodality of `tx_failed` (0–1/s against
+  7–21/s) makes that split clean.
+- **A regime shift must not be absorbed as variance.** Folding a 15 dB jump into
+  the running estimate inflated the standard deviation to ~15 dB, which raised
+  every derived threshold enough that none of them could fire again. The estimate
+  is held while outliers are counted, and restarted once they persist — a new
+  dongle or a new parking spot reconverges instead of averaging against the old
+  world forever.
+- **It has to reach the decision.** It did not. For one evening the box collected
+  141 samples on the F32 (mean −78.6, sd 2.2), persisted them, and fed join and
+  rejoin from them, while every *leave* decision used the static config values —
+  an edit that was lost before it was ever committed, in a code path whose tests
+  re-implemented the rules instead of calling them. There was nothing to see in
+  the log, because the trace field that would have shown it was lost with it. The
+  decision now lives in one function that derives the effective car itself, and
+  the test asserts behaviour: at a signal between the learned and configured
+  thresholds, the box must leave.
+
+The last one is the general lesson. An adaptive system that is not wired to
+anything fails silently and looks healthy the whole time — it keeps producing
+plausible numbers, and nothing goes red.
+
 ## Still open
 
-1. **Why it ever dropped.** Two instrumented departures did not reproduce it. Both
-   laps were short (~3 min out) and the complaint is specifically "once on the
-   road", so a longer drive is the next test. The F22 *did* fail on the morning of
-   2026-11-11, with the box clinging at 1 Mb/s for 25 s before the link died —
-   which the `fail_rate` rule now prevents, but that is n=1 either way.
+1. **Why it ever dropped.** Three instrumented departures did not reproduce it,
+   including the long drive with stops that the short laps were meant to rule
+   out. The F22 *did* fail on the morning of 2026-11-11, with the box clinging at
+   1 Mb/s for 25 s before the link died — which the `fail_rate` rule now
+   prevents, but that is n=1 either way, and it happened on the car that has had
+   one instrumented drive to the F32's two. The remaining untested difference is
+   the F22 itself, not the length of the drive.
 2. **The disassoc burst.** Does cutting the redundant request measurably shrink it,
    and does the burst matter to CarPlay at all?
 3. **Car restart:** does iOS remember *Use For Internet*, or must it be tapped each time?
