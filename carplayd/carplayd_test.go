@@ -1,10 +1,10 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/binary"
 	"net"
 	"net/netip"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -319,13 +319,16 @@ func TestHuntFreqsDedup(t *testing.T) {
 	}
 }
 
+// The example config is embedded rather than opened from the working
+// directory, so this test travels with the binary. The test binaries are
+// cross-compiled and run on the Pi itself (scripts/release.sh testbin), where
+// the source tree is not present and an os.Open of a sibling file fails.
+//
+//go:embed carplayd.conf.example
+var exampleConf string
+
 func TestExampleConfigParses(t *testing.T) {
-	f, err := os.Open("carplayd.conf.example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	cfg, err := parseConfig(f)
+	cfg, err := parseConfig(strings.NewReader(exampleConf))
 	if err != nil {
 		t.Fatalf("example config: %v", err)
 	}

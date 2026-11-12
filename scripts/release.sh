@@ -42,7 +42,29 @@ test_mod() {
 		sh -c 'test -z "$(gofmt -l .)" || { echo "gofmt:"; gofmt -l .; exit 1; }; go vet ./... && go test -race ./...'
 }
 
+# testbin cross-compiles the test binaries so they can run on the target itself.
+# The suites pass on the build host, but the host is amd64 with a different
+# kernel: running them on the Pi is what checks the arm64 build and the real
+# `iw`/`nl80211` behind the code paths that shell out.
+#
+#   scripts/release.sh testbin   -> out/<name>.test-linux-arm64
+testbin() {
+	for spec in carplayd:carplayd recon/carrecon:carrecon recon/carnetbridge:carnetbridge; do
+		dir=${spec%:*} name=${spec#*:}
+		echo "  $name.test-linux-arm64"
+		podman run --rm -v "$REPO:/work:Z" -v "$CACHE/go:/gocache:z" -v "$CACHE/gomod:/gomod:z" \
+			-e GOCACHE=/gocache -e GOMODCACHE=/gomod -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=arm64 \
+			-w "/work/$dir" "$IMAGE" \
+			go test -c -trimpath -o "/work/out/$name.test-linux-arm64" .
+	done
+}
+
 what=${1:-all}
+if [ "$what" = testbin ]; then
+	echo "building test binaries"
+	testbin
+	exit 0
+fi
 for c in carplayd carrecon carnetbridge; do
 	[ "$what" = all ] || [ "$what" = "$c" ] || continue
 	case $c in
