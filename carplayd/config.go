@@ -63,6 +63,7 @@ type Config struct {
 	HealthFail    int           // consecutive failed checks before withdrawing
 	HealthTargets []string      // host:port to TCP-connect; default: each DNS server, port 53
 	IdleSwitch    time.Duration // serve another car once the served one has had no phone this long
+	RejoinAfter   time.Duration // never rejoin a car this soon after leaving it, whatever its signal
 	Survey        time.Duration // lab: log each visible car's signal this often ("sighting", "signal" events); 0 = off
 	Metrics       string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
 	Debug         bool          // log every wpa event, full scan results, all link counters and the leave decision each poll
@@ -78,7 +79,7 @@ func defaultConfig() Config {
 		RAInterval: 4 * time.Second, RouterLife: 20 * time.Second, // 20 s: an abrupt drive-out (no goodbye possible) strands the phone at most this long
 		DNS:       []netip.Addr{netip.MustParseAddr("2001:4860:4860::8888"), netip.MustParseAddr("2606:4700:4700::1111")},
 		WPABinary: "wpa_supplicant",
-		NAT66:     "none", IdleSwitch: time.Minute,
+		NAT66:     "none", IdleSwitch: time.Minute, RejoinAfter: 20 * time.Second,
 		Firewall: "nft", Health: true, HealthEvery: 3 * time.Second, HealthFail: 2,
 		Learn: true,
 	}
@@ -251,6 +252,8 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 		cfg.EventsPath = v
 	case "survey":
 		cfg.Survey, err = time.ParseDuration(v)
+	case "rejoin_after":
+		cfg.RejoinAfter, err = time.ParseDuration(v)
 	case "idle_switch":
 		cfg.IdleSwitch, err = time.ParseDuration(v)
 	case "metrics":

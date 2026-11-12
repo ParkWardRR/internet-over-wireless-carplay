@@ -146,3 +146,37 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// A car that was just left must not be rejoined on signal alone. Measured on
+// the F22 departure: twelve seconds after a leave the signal had recovered to
+// -76 dBm while the car was still driving away, and a level-based rule let it
+// straight back in.
+func TestRejoinHoldOff(t *testing.T) {
+	cars := []Car{{ID: "A", Join: -80, Rejoin: -77, Leave: -85}, {ID: "B", Join: -80, Rejoin: -77, Leave: -85}}
+	now := time.Now()
+	left := map[string]time.Time{"A": now.Add(-5 * time.Second)}
+
+	got := holdOff(cars, left, now, 20*time.Second)
+	if len(got) != 1 || got[0].ID != "B" {
+		t.Errorf("A left 5s ago and was not held off: %+v", ids(got))
+	}
+	// Once the hold-off has passed it is a candidate again.
+	if got := holdOff(cars, left, now.Add(30*time.Second), 20*time.Second); len(got) != 2 {
+		t.Errorf("A still held off after the window: %+v", ids(got))
+	}
+	// Disabled, and the no-history case, must not filter anything.
+	if got := holdOff(cars, left, now, 0); len(got) != 2 {
+		t.Errorf("hold-off of 0 filtered cars: %+v", ids(got))
+	}
+	if got := holdOff(cars, nil, now, 20*time.Second); len(got) != 2 {
+		t.Errorf("empty history filtered cars: %+v", ids(got))
+	}
+}
+
+func ids(cs []Car) []string {
+	var out []string
+	for _, c := range cs {
+		out = append(out, c.ID)
+	}
+	return out
+}

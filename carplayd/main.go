@@ -135,6 +135,7 @@ func buildLinks(cfg Config, out *evWriter, m *metrics, prof *profiles) []*daemon
 			out: out, m: m, prof: prof,
 			held: map[string]bool{}, firstSeen: map[string]time.Time{},
 			lastSurvey: map[string]time.Time{}, relaxed: map[string]int{},
+			leftAt:  map[string]time.Time{},
 			healthC: make(chan upstream, 1),
 		})
 	}

@@ -33,10 +33,11 @@ type daemon struct {
 	lastSurvey   map[string]time.Time // last sighting/signal logged per car (survey)
 	samples      []sample             // signal polls of the served car, last 25 s
 	belowTrend   time.Time
-	failSamples  []failSample   // tx_failed readings, last failWindow
-	failPerSec   int            // its rise per second across that window
-	belowFail    time.Time      // since when failPerSec has been at or over the car's fail_rate
-	relaxed      map[string]int // rejoin threshold after a trend leave: near the parked level
+	failSamples  []failSample         // tx_failed readings, last failWindow
+	failPerSec   int                  // its rise per second across that window
+	belowFail    time.Time            // since when failPerSec has been at or over the car's fail_rate
+	relaxed      map[string]int       // rejoin threshold after a trend leave: near the parked level
+	leftAt       map[string]time.Time // when each car was last left, for the rejoin hold-off
 	huntTick     int
 	phones       int
 	out          *evWriter
@@ -428,7 +429,8 @@ func (d *daemon) onScanResults() {
 			delete(d.relaxed, id)
 		}
 	}
-	car, e, ok := pick(relaxRejoin(d.learnedCars(), d.relaxed), d.held, seen)
+	cand := holdOff(d.learnedCars(), d.leftAt, now, d.cfg.RejoinAfter)
+	car, e, ok := pick(relaxRejoin(cand, d.relaxed), d.held, seen)
 	if !ok {
 		return
 	}
@@ -688,6 +690,7 @@ func (d *daemon) poll() {
 		}
 		d.ev("leave", car.ID, strconv.Itoa(sig), why)
 		d.m.inc("leaves")
+		d.leftAt[car.ID] = now // no rejoin for cfg.RejoinAfter, whatever the signal does
 		d.stopServing(true)
 		d.held[car.ID] = true
 		if trend && !leave {
