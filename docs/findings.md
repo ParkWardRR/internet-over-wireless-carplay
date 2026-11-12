@@ -63,12 +63,81 @@ flowchart LR
 - **Prior art.** Apart from ksweber's 2022 manual-IPv4 setup, ~30 searches in four languages and GitHub code search found no public implementation that gives a factory CarPlay network internet from a second device. We found no prior description of the IPv6/iOS 27 route; that doesn't prove there is none.
 - **Several research-agent "quotes" were made up.** Every claim in these docs was re-checked against a fetched source or the device. Bimmerfest and the Apple forums block bots; `https://r.jina.ai/<url>` reads them.
 
+## Departures: what actually goes wrong (2026-11-11)
+
+The box works while parked. The hard part is leaving, and a day of recording both
+sides of two real departures changed what we think the problem is. Raw numbers in
+[test-log.md](test-log.md); the procedure is [drive-runbook.md](drive-runbook.md).
+
+**The garage decides everything.** The box sits behind a cinderblock wall 6–11 ft
+from the cars. A parked car reads **−74…−82 dBm** where free space at that range
+would give about −40, the car 5 ft *further* away often reads *stronger*, and
+parked signal overlaps the signal at which the link dies. Every absolute dBm
+threshold in this repo was meaningless outside that one garage, which is why
+carplayd now learns them per car instead (see below).
+
+**RSSI cannot detect a departure here.** Measured on the F32 drive: the signal sat
+**flat at −77…−83 for 35 seconds** and then the link simply died. The absolute
+rule needed below −85; the trend rule's baseline tracked the signal down, so its
+own threshold slid to −86…−88. Neither could ever fire. Driving out of a basement
+is abrupt obstruction, not a fade.
+
+**`tx_failed` is the only advance warning.** Flat at 2848 for minutes, then
+climbing ~10/s for the last 8 seconds, with tx_bitrate pinned at the 1 Mb/s floor.
+Across 606 serving polls the rate is **bimodal — 0–1/s healthy, 7–21/s failing,
+and never anything between 2 and 6** — so a threshold of 5/s sits in an empty gap
+and needs no tuning. Leaving on that instead of on signal produced **3 leaves out
+of 3 with a goodbye sent, and zero `link_lost`**, against the F32's
+`link_lost reason=0` with no goodbye two hours earlier.
+
+**The airtime hypothesis looks wrong.** It had been the leading explanation: the
+head unit relays the far box's traffic at 1–2 Mb/s and starves CarPlay. Against
+it: CarPlay throughput rose 312 → 1209 kB/s when the box dropped out, which looks
+like relief, but the phone's **retry rate went up (3.0 % → 4.7 %)**, the opposite
+of what contention predicts, and the owner parked at exactly the moment the rate
+collapsed again. Parked static screen ≈ 300 kB/s, moving map ≈ 1200 kB/s: the
+jump is *demand*. Estimated occupancy was ~2.4 % box against ~3.8 % CarPlay,
+nowhere near saturation. [Heusse et al.](https://infocom2003.ieee-infocom.org/papers/21_01.PDF)
+still describes a real effect, but it does not appear to be what breaks CarPlay here.
+
+**CarPlay did not drop on either car, with the box on.** Two drives, same route,
+both cars, no drop — confirmed by the owner and corroborated independently by the
+in-car recorder (the phone→head-unit rate's per-second minimum never fell below
+160 kB/s through a departure). The original "drops on every departure" is not
+reproducing. Personal Hotspot, the other obvious candidate, is never on.
+
+**One real cost remains, and it is ours.** Every leave emits a burst of disassoc
+frames the head unit never ACKs: 5–8 distinct frames, each retried 7 times by the
+driver, **19–51 transmissions in a 40–48 ms burst, all at 1 Mb/s** — solid channel
+occupancy at the moment CarPlay is live, on all three of the F22 drive's leaves,
+and at −81 dBm rather than out of range. One redundant disconnect request has been
+removed; the driver's retries are not ours to suppress.
+
+**Wireless CarPlay rides the same BSS the box joins.** Apple's
+[WWDC17 #717](https://developer.apple.com/videos/play/wwdc2017/717/) states the
+Wi-Fi link carries all CarPlay audio, video and iAP2, with Bluetooth only for
+discovery and reconnect. The head unit also runs a second BSS on the same channel,
+`DIRECT-xx-BMW#####`, a Wi-Fi Direct group owner — but it sits idle with no
+associated stations, and the phone associates to the `CarPlay` AP. So the box and
+CarPlay share one BSS and one AP radio, not merely one channel. The head unit
+advertises **no BSS Load element**, so there is no channel-utilisation figure to
+read; airtime has to be computed from the capture.
+
 ## Still open
 
-1. **Driving out (P4):** how fast the phone returns to cellular. The goodbye RA can't reach the phone once the car is out of range, so it's up to the 60 s router lifetime.
-2. **Car restart:** does iOS remember *Use For Internet*, or must it be tapped each time?
-3. **Permanent box (P3):** join automatically when the car's Wi-Fi appears, start radvd and NAT with it, survive reboots. garage-sbc can do it as is, or use a dedicated 2.4 GHz-capable box.
+1. **Why it ever dropped.** Two instrumented departures did not reproduce it. Both
+   laps were short (~3 min out) and the complaint is specifically "once on the
+   road", so a longer drive is the next test. The F22 *did* fail on the morning of
+   2026-11-11, with the box clinging at 1 Mb/s for 25 s before the link died —
+   which the `fail_rate` rule now prevents, but that is n=1 either way.
+2. **The disassoc burst.** Does cutting the redundant request measurably shrink it,
+   and does the burst matter to CarPlay at all?
+3. **Car restart:** does iOS remember *Use For Internet*, or must it be tapped each time?
 4. **IPv4-only services:** a few Apple endpoints and Mapbox have no AAAA. DNS64 + NAT64 on the box would cover them.
+5. **Scaling.** The software serves a car per radio without limit; the RF does not.
+   Ten AR9271s in one box all on channel 11 would contend with the very CarPlay
+   sessions they serve, and draw 4–5 A of USB power. Three or four is the likely
+   practical ceiling.
 
 ## Tools in this repo
 
@@ -78,3 +147,6 @@ flowchart LR
 | `scripts/poc-mac-nat.sh` | The same on a Mac (rtadvd + pf) |
 | `scripts/car-ie.sh` | Beacon decoder for the Mac (needs Location permission) |
 | `ios/CarNetProbe` | iPhone app: path state, Wi-Fi-bound vs default probes, AAAA check, Bonjour, Watch mode ([iphone-diagnostics.md](iphone-diagnostics.md)) |
+| `carplayd` | The daemon: joins whichever car appears, advertises the route, leaves on link failure with a goodbye, learns its own thresholds. One radio per car serves them all at once |
+| `recon/carrecon` | In-car passive recorder: monitor mode on the car channel, pcap ring, per-second per-station counters, head-unit RSSI from beacons, 4-way-handshake message numbers ([recon-box.md](recon-box.md)) |
+| `emu/` | A VM harness that replays scripted departures against the real daemon |

@@ -61,6 +61,29 @@ flowchart LR
   L --> W((Internet))
 ```
 
+## What it does now
+
+- **Joins whichever configured car appears** and gives its phones internet over IPv6,
+  with NAT66 and an nftables table that isolates each car link (internet only: not
+  the box, not the home LAN, not the other car).
+- **Leaves before the link dies, with a goodbye.** Departures here do not fade —
+  the signal stays flat and the link drops — so it leaves on the driver's
+  `tx_failed` rate rising, which gives about 8 seconds of warning where RSSI gives
+  none. Validated on a real departure: 3 leaves, 3 goodbyes, no stranded routes.
+- **Learns its own thresholds.** Absolute dBm cannot be configured for this: the
+  box is behind a cinderblock wall where parked and dying signal overlap, and every
+  number moves when a car parks elsewhere or a radio is swapped. Each car's healthy
+  band is learned at runtime, persisted, and re-learned when the world changes.
+- **A radio per car serves them all at once.** Cars sharing a radio take turns.
+- **Recovers a deaf radio.** The AR9271 stops receiving while the driver reports
+  nothing wrong; a run of empty scans on a channel that always has neighbours means
+  the radio, and it is rebuilt without disturbing the other cars' links.
+- **Records both sides of a drive.** `carrecon` runs in the car in monitor mode so a
+  departure can be reconstructed from the air, not just from the box's own view.
+
+See [findings.md](docs/findings.md) for what the measurements actually showed —
+including a leading hypothesis that the data did not support.
+
 ## The problem
 
 Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 digits> CarPlay`). That network hands out an address but no router and no DNS, and its beacon says "no internet". So the phone keeps cellular as its internet path, and underground there's no cellular: Google Maps can't search or route until you drive out.
