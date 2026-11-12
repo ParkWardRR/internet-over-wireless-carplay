@@ -49,6 +49,29 @@ func best(c Car, seen []scanEntry) (scanEntry, bool) {
 	return out, found
 }
 
+// holdOff drops cars that left too recently to be rejoined, whatever their
+// signal looks like now.
+//
+// A level-based rule cannot do this on its own. On the 2026-11-11 F22
+// departure the signal genuinely recovered to -76 dBm twelve seconds after a
+// leave -- multipath through the garage wall is not monotonic in distance -- so
+// the box rejoined a car it was actively driving away from, then had to leave
+// again fourteen seconds later. Only elapsed time distinguishes "the link
+// recovered" from "we are still leaving".
+func holdOff(cars []Car, leftAt map[string]time.Time, now time.Time, d time.Duration) []Car {
+	if d <= 0 || len(leftAt) == 0 {
+		return cars
+	}
+	out := make([]Car, 0, len(cars))
+	for _, c := range cars {
+		if t, ok := leftAt[c.ID]; ok && now.Sub(t) < d {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 // releaseHolds clears the hold-off for cars absent from a scan: once the AP
 // has gone (car off or far away), its return counts as a fresh arrival.
 func releaseHolds(cars []Car, held map[string]bool, seen []scanEntry) {
