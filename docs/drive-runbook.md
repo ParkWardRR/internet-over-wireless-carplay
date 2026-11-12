@@ -75,6 +75,51 @@ a time that can be up to an hour stale. Keep it powered continuously; do not reb
 Anything other than `0x0` during the power-bank soak means the supply is not holding up; a sticky
 `0x10000` with a clean `0x1` means it dipped earlier but is steady now.
 
+## The support rig: three things that bit us
+
+All three were found while prepping a drive, none of them in the car.
+
+**The clock goes stale on any reboot, and in the car nothing corrects it.** recon-pi has no
+RTC. After an unexplained reboot during prep, `fake-hwclock` restored a clock **16 minutes behind**
+real time; it was only corrected because an NTP server happened to be reachable. On a drive there is
+no network, so that error would have stood for the whole recording and silently destroyed the merge
+with the garage box — the logs would still look perfectly plausible. Mitigations: keep it powered,
+and save the clock every 30 s rather than hourly, which caps the worst case at ~10 s (measured):
+
+    # /etc/systemd/system/fake-hwclock-save.timer.d/override.conf
+    [Timer]
+    OnCalendar=
+    OnCalendar=*:*:0/30
+    AccuracySec=1s
+
+**Both boxes must trace to the same time reference.** recon-pi shipped with systemd-timesyncd
+pointed at the public NTP pool while the garage box uses chrony against the LAN's GPS stratum-1
+chain. They agreed only by luck. chrony on both, same sources, is the fix — and chrony is the better
+client here anyway, because its drift file keeps the clock rate-corrected while the Pi is offline in
+the car. Sources go in `/etc/chrony/conf.d/` so the distro config stays untouched, with no `prefer`
+on any of them: chrony picks by root distance, so a local stratum 1 wins when reachable and a
+directly-cabled laptop wins when it is the only thing there.
+
+**A reboot has to leave evidence.** Raspberry Pi OS ships
+`/usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf`, which keeps the journal in RAM to
+spare the SD card. That is why the reboot above was undiagnosable: the previous boot was simply
+gone, and `vcgencmd get_throttled`'s sticky bits reset on boot too, so there was no way to tell a
+brownout from a knocked cable. Override with `Storage=persistent` (cap `SystemMaxUse`), and
+remember to `journalctl --flush` after changing it at runtime, or it stays in `/run` until the next
+boot. Without this, "did it reboot, and why" is unanswerable after a drive.
+
+**If you reach the Pi over a direct cable** (laptop ethernet instead of the house switch), give the
+interface a *manual* address. With NetworkManager's `ipv4.method=auto` there is no DHCP server to
+answer, so it reports `ip-config-unavailable`, fails the whole connection, drops to `disconnected` —
+discarding any extra manual address with it — and then waits 5 minutes before retrying. The box
+looks dead while being perfectly healthy, which is an alarming thing to see an hour before a drive:
+
+    nmcli con mod "<profile>" ipv4.method manual ipv4.addresses 192.168.77.2/24
+    nmcli con mod "<profile>" ipv4.gateway "" ipv4.never-default yes ipv6.method link-local
+
+The laptop's NTP server also has to allow that subnet, and its own interface should carry no router,
+so it cannot become the laptop's default route.
+
 ## Known confounders to rule out first
 
 - **iPhone Personal Hotspot must be off.** Multiple reports have wireless CarPlay dropping within
