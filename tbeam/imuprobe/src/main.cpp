@@ -254,12 +254,18 @@ static void phaseD() {
                   edges > 0 ? "<<< THE PART IS ALIVE" : "(quiet -- dead part, or wrong GPIO)");
 }
 
+// The battery runs from loop(), not setup(), and repeats.
+//
+// This board is native USB-CDC: resetting it drops the USB device, so the host
+// cannot have a port open across the reset, and anything printed from setup()
+// is gone before a terminal can attach. The first run of this program produced
+// a completely empty capture for exactly that reason. Repeating costs nothing
+// and means attaching at any moment catches the next pass.
+static void battery();
+
 void setup() {
     Serial.begin(115200);
     for (uint32_t t = millis(); !Serial && millis() - t < 2500;) delay(10);
-    Serial.println("\n=== imuprobe: QMI8658 read-only diagnostic ===");
-    Serial.println("datasheet: WHO_AM_I 0x00 = 0x05; System Turn On Time 1.75s from rails stable");
-    Serial.println("           CS pin selects interface (high = I2C-UI, SPI idle)");
 
     Wire1.begin(PIN_I2C1_SDA, PIN_I2C1_SCL);
     if (!pmu.begin(Wire1, ADDR_PMU, PIN_I2C1_SDA, PIN_I2C1_SCL)) {
@@ -272,13 +278,19 @@ void setup() {
     digitalWrite(PIN_IMU_CS, HIGH);
     deselectCard();
     periphSPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
-
-    Serial.printf("\n--- A control: rail has been up since boot ---\nALDO2 %s %dmV\n",
-                  pmu.isEnableALDO2() ? "on" : "off", pmu.getALDO2Voltage());
     delay(SETTLE_MS);
+}
+
+static void battery() {
+    Serial.println("=== imuprobe: QMI8658 diagnostic ===");
+    Serial.println("datasheet: WHO_AM_I 0x00 = 0x05; System Turn On Time 1.75s from rails stable");
+    Serial.printf("ALDO2 %s %dmV (note: the IMU is NOT on this rail -- see below)\n",
+                  pmu.isEnableALDO2() ? "on" : "off", pmu.getALDO2Voltage());
+
+    Serial.println("\n--- A control: rail has been up since boot ---");
     for (int i = 0; i < 3; i++) {
         readPair("A rail-up-since-boot", millis());
-        delay(500);
+        delay(200);
     }
 
     for (uint32_t hz : {100000UL, 500000UL, 4000000UL}) dump("register dump", hz);
@@ -288,10 +300,16 @@ void setup() {
     Serial.println("\n=== done.");
     Serial.println("The IMU is on VDD3V3 (schematic UX1 pins 5 and 8), not ALDO2, so it has");
     Serial.println("been powered continuously and the 1.75 s turn-on time is long satisfied.");
-    Serial.println("Next steps are physical, and the schematic names the parts to probe:");
+    Serial.println("If every phase above failed, the next steps are physical:");
     Serial.println("  - VDDIO at C21 (100nF), VDD at C22 (100nF) / C20 (1uF). Expect 1.71-3.6 V.");
     Serial.println("  - is UX1 populated at all? It is a 14-pin LGA, ~2.5 x 3 mm.");
     Serial.println("  - capture CS 34 / SCK 36 / MOSI 35 / MISO 37 during one register-0 read.");
+    Serial.println("  - a COLD power cycle: USB out AND the 18650 out. Never yet done.");
 }
 
-void loop() { delay(1000); }
+void loop() {
+    static uint32_t n = 0;
+    Serial.printf("\n\n########## pass %lu (repeats every 20 s) ##########\n", (unsigned long)++n);
+    battery();
+    delay(20000);
+}
