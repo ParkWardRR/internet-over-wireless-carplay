@@ -77,41 +77,39 @@ static void readPair(const char *tag, uint32_t sinceMs) {
                   (w0 == 0x05 || w3 == 0x05) ? "<<< WHO_AM_I CORRECT" : "");
 }
 
-static void railOff() {
-    pmu.disableALDO2();
-    delay(400);  // let the rail actually fall, not just the register change
-}
+// NOTE (from the V3.1 schematic, read 11 Nov 2026): the earlier version of this
+// program power-cycled ALDO2 between phases. That was pointless. The schematic
+// shows the QMI8658A (designator UX1) with **pin 5 VDDIO and pin 8 VDD both tied
+// to VDD3V3**, decoupled by C21 (100nF), C22 (100nF) and C20 (1uF). ALDO2 does
+// not reach it. VDD3V3 also feeds the RTC and the programming header, so it is a
+// main rail: nothing in software can cycle it, and an ESP32 reset does not drop
+// it either.
+//
+// Two consequences:
+//   - no test ever run on this board has power-cycled the IMU;
+//   - the 1.75 s turn-on time has been satisfied for hours, so that hypothesis
+//     cannot explain a failure on a board that has been powered all along.
+//
+// Only a full cold power-down -- USB out and the 18650 removed -- cycles it, and
+// that cannot be done from here. So this program now does the one thing software
+// still can: read widely and patiently, and print something worth sending to
+// LilyGO.
 
-// csLow: hold CS low through power-up, so the part sees SPI rather than I2C on
-// its selection pin as its supplies come up.
-static void railOn(bool csLow) {
-    pinMode(PIN_IMU_CS, OUTPUT);
-    digitalWrite(PIN_IMU_CS, csLow ? LOW : HIGH);
-    pmu.setALDO2Voltage(3300);
-    pmu.enableALDO2();
-}
-
-static void phase(const char *name, bool csLow) {
-    Serial.printf("\n--- %s ---\n", name);
-    Serial.printf("rail off, then on with CS %s; ALDO2 reads %s %dmV\n", csLow ? "LOW" : "HIGH",
-                  pmu.isEnableALDO2() ? "on" : "off", pmu.getALDO2Voltage());
-    railOff();
-    uint32_t t0 = millis();
-    railOn(csLow);
-    // Nothing is read before the datasheet's turn-on time has elapsed: reading
-    // early is what every previous attempt did.
-    delay(SETTLE_MS);
-    if (csLow) {
-        digitalWrite(PIN_IMU_CS, HIGH);  // release it before the first transaction
-        delay(10);
+// dump reads a span of registers in both SPI modes at several clock rates. The
+// pattern across addresses is the evidence: a floating bus reads the same byte
+// everywhere, while a part that is answering badly varies with the address.
+static void dump(const char *tag, uint32_t hz) {
+    Serial.printf("\n-- %s @ %lu Hz --\n", tag, (unsigned long)hz);
+    for (uint8_t base = 0x00; base < 0x20; base += 8) {
+        Serial.printf("  0x%02X: ", base);
+        for (uint8_t i = 0; i < 8; i++) Serial.printf("%02X ", rd(base + i, SPI_MODE0, hz));
+        Serial.print(" |m3| ");
+        for (uint8_t i = 0; i < 8; i++) Serial.printf("%02X ", rd(base + i, SPI_MODE3, hz));
+        Serial.println();
     }
-    Serial.printf("waited %lums (spec: %lums)\n", (unsigned long)(millis() - t0), (unsigned long)TURN_ON_MS);
-    // Then keep reading: a part that becomes ready late shows up here and
-    // nowhere else.
-    for (int i = 0; i < 10; i++) {
-        readPair(csLow ? "C cs-low-at-power" : "B cs-high-at-power", millis() - t0);
-        delay(1000);
-    }
+    // The registers the datasheet names, called out so they are not lost in the grid.
+    Serial.printf("  WHO_AM_I(0x00)=0x%02X  REVISION_ID(0x01)=0x%02X   (expect 0x05, then a revision)\n",
+                  rd(0x00, SPI_MODE0, hz), rd(0x01, SPI_MODE0, hz));
 }
 
 void setup() {
@@ -141,11 +139,15 @@ void setup() {
         delay(500);
     }
 
-    phase("B power-cycle, CS idling HIGH through power-up", false);
-    phase("C power-cycle, CS held LOW through power-up", true);
+    for (uint32_t hz : {100000UL, 500000UL, 4000000UL}) dump("register dump", hz);
 
-    Serial.println("\n=== done. If every line reads 0x3E, the two datasheet-conformance");
-    Serial.println("=== hypotheses (turn-on time, CS-at-power-up) are both eliminated.");
+    Serial.println("\n=== done.");
+    Serial.println("The IMU is on VDD3V3 (schematic UX1 pins 5 and 8), not ALDO2, so it has");
+    Serial.println("been powered continuously and the 1.75 s turn-on time is long satisfied.");
+    Serial.println("Next steps are physical, and the schematic names the parts to probe:");
+    Serial.println("  - VDDIO at C21 (100nF), VDD at C22 (100nF) / C20 (1uF). Expect 1.71-3.6 V.");
+    Serial.println("  - is UX1 populated at all? It is a 14-pin LGA, ~2.5 x 3 mm.");
+    Serial.println("  - capture CS 34 / SCK 36 / MOSI 35 / MISO 37 during one register-0 read.");
 }
 
 void loop() { delay(1000); }
