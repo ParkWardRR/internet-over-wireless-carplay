@@ -72,6 +72,61 @@ func leaveCheck(below time.Time, now time.Time, signal, leave int, leaveFor time
 	return below, now.Sub(below) >= leaveFor
 }
 
+// sustain tracks how long a condition has held. It returns the updated "true
+// since" time (zero while false) and whether it has held for at least `for_`.
+// leaveCheck is the signal-threshold special case of this.
+func sustain(since time.Time, now time.Time, cond bool, for_ time.Duration) (time.Time, bool) {
+	if !cond {
+		return time.Time{}, false
+	}
+	if since.IsZero() {
+		since = now
+	}
+	return since, now.Sub(since) >= for_
+}
+
+// failRate is the per-second rise in the driver's tx_failed counter. It reports
+// ok = false when there is nothing to compare: no previous reading, no elapsed
+// time, or a counter that went backwards (the station re-associated and its
+// counters restarted, which is not a failing link).
+func failRate(prev, cur int, elapsed time.Duration) (int, bool) {
+	if prev < 0 || cur < prev || elapsed <= 0 {
+		return 0, false
+	}
+	return int(float64(cur-prev) / elapsed.Seconds()), true
+}
+
+// failSample is one tx_failed reading.
+type failSample struct {
+	t time.Time
+	n int
+}
+
+// failWindow: the failure rate is measured across a trailing window, not
+// between consecutive polls. The poll-to-poll delta is far too noisy to hold a
+// threshold against — on the real departure it alternated above and below from
+// one second to the next (53, 4, 6, 6, 5 per second), which kept restarting
+// the sustain timer and pushed the leave to one second before the link died.
+const failWindow = 5 * time.Second
+
+// failRateOf is the per-second rise in tx_failed across the window.
+func failRateOf(s []failSample) (int, bool) {
+	if len(s) < 2 {
+		return 0, false
+	}
+	first, last := s[0], s[len(s)-1]
+	return failRate(first.n, last.n, last.t.Sub(first.t))
+}
+
+// trimFail drops readings older than failWindow.
+func trimFail(s []failSample, now time.Time) []failSample {
+	i := 0
+	for i < len(s) && now.Sub(s[i].t) > failWindow {
+		i++
+	}
+	return s[i:]
+}
+
 // shouldSwitch decides whether to leave the car we serve for another one that
 // is also on. Only a single STA serves one car at a time, so: never abandon a
 // car with a phone; switch only when the served car has had no phone for
@@ -345,8 +400,9 @@ var linkFields = []string{
 
 // relaxRejoin returns cars with the rejoin threshold replaced for cars that
 // left on a signal trend (relaxed[id] = near the level they were parked at).
-// It can be stricter than Rejoin (the car left above it) or easier (a dip while
-// parked at a weak spot).
+// Only ever stricter than Rejoin, never easier: an "easier" relaxed threshold
+// is what let the box rejoin a car it had just left while still driving away
+// (docs/test-log.md, 2026-11-11 F22) and then cling on at 1 Mb/s.
 func relaxRejoin(cars []Car, relaxed map[string]int) []Car {
 	if len(relaxed) == 0 {
 		return cars
@@ -354,7 +410,7 @@ func relaxRejoin(cars []Car, relaxed map[string]int) []Car {
 	out := append([]Car(nil), cars...)
 	for i := range out {
 		if v, ok := relaxed[out[i].ID]; ok {
-			out[i].Rejoin = v
+			out[i].Rejoin = max(v, out[i].Rejoin)
 		}
 	}
 	return out
