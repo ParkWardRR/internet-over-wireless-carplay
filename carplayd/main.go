@@ -61,6 +61,14 @@ func main() {
 	}
 	prof := loadProfiles(cfg.StatePath)
 
+	// Register every configured car up front. Without this the gauges for a
+	// car appear only once it has been served, so a dashboard or an alert on
+	// "car B not serving" has nothing to read until the first time it works --
+	// exactly when you want to be told.
+	for _, c := range cfg.Cars {
+		m.setCar(c.ID, func(*carMetric) {})
+	}
+
 	links := buildLinks(cfg, out, m, prof)
 
 	// Upstream reachability is a property of the box, not of a link, so it is

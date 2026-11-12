@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -303,5 +304,28 @@ psk = 12345678
 	if !links[0].owner || len(links[0].cfg.Cars) != 2 || links[0].cfg.CtrlDir != cfg.CtrlDir {
 		t.Errorf("single-radio link changed shape: owner=%t cars=%d ctrl=%s",
 			links[0].owner, len(links[0].cfg.Cars), links[0].cfg.CtrlDir)
+	}
+}
+
+// Every configured car must have metric series from the start. If they only
+// appear once a car has been served, an alert on "car B is not serving" has
+// nothing to read until the first time it works.
+func TestMetricsPreRegisterEveryCar(t *testing.T) {
+	m := newMetrics()
+	for _, id := range []string{"A", "B"} {
+		m.setCar(id, func(*carMetric) {})
+	}
+	rec := httptest.NewRecorder()
+	m.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	body := rec.Body.String()
+	for _, want := range []string{
+		`carplayd_serving{car="A"} 0`,
+		`carplayd_serving{car="B"} 0`,
+		`carplayd_signal_dbm{car="A"}`,
+		`carplayd_phones{car="B"}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics missing %q\n%s", want, body)
+		}
 	}
 }
