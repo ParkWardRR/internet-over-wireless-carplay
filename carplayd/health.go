@@ -119,7 +119,7 @@ func (d *daemon) applyFirewall(block []netip.Prefix) error {
 		return nil
 	}
 	cmd := exec.Command("nft", "-f", "-")
-	cmd.Stdin = strings.NewReader(nftRuleset(d.cfg, block))
+	cmd.Stdin = strings.NewReader(nftRuleset(d.fw, block))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return &cmdError{"nft -f -", err, strings.TrimSpace(string(out))}
 	}

@@ -218,3 +218,90 @@ psk = 12345678
 		t.Errorf("single-radio ruleset invented a derived STA name:\n%s", rs)
 	}
 }
+
+// One daemon per radio, each confined to its own cars and interface, sharing
+// exactly the things that must be shared. Getting this wrong is how two links
+// end up fighting over one control socket or writing interleaved log lines.
+func TestBuildLinksIsolatesRadiosAndSharesTheRest(t *testing.T) {
+	cfg := radioConfig(t, `
+phy = phy0
+sta = wlan0
+uplink = eth0
+firewall = nft
+[car A]
+ssid = BMW00001 CarPlay
+psk = 12345678
+phy = phy1
+[car B]
+ssid = BMW00002 CarPlay
+psk = 12345678
+phy = phy2
+`)
+	out, m, prof := &evWriter{}, newMetrics(), newProfiles("")
+	links := buildLinks(cfg, out, m, prof)
+	if len(links) != 2 {
+		t.Fatalf("want 2 links, got %d", len(links))
+	}
+
+	// Exactly one owner, or the firewall is built twice (or never).
+	owners := 0
+	for _, d := range links {
+		if d.owner {
+			owners++
+		}
+	}
+	if owners != 1 || !links[0].owner {
+		t.Errorf("want exactly the first link owning shared state, got %d owners", owners)
+	}
+
+	ctrl := map[string]bool{}
+	for i, d := range links {
+		// Each link sees only its own car.
+		if len(d.cfg.Cars) != 1 {
+			t.Errorf("link %d got %d cars, want 1", i, len(d.cfg.Cars))
+		}
+		if d.cfg.STA != d.cfg.Cars[0].STA || d.cfg.Phy != d.cfg.Cars[0].Phy {
+			t.Errorf("link %d radio mismatch: cfg %s/%s vs car %s/%s",
+				i, d.cfg.Phy, d.cfg.STA, d.cfg.Cars[0].Phy, d.cfg.Cars[0].STA)
+		}
+		// Control sockets must not collide.
+		if ctrl[d.cfg.CtrlDir] {
+			t.Errorf("link %d reuses control dir %s", i, d.cfg.CtrlDir)
+		}
+		ctrl[d.cfg.CtrlDir] = true
+		// Shared singletons really are shared.
+		if d.out != out || d.m != m || d.prof != prof {
+			t.Errorf("link %d does not share the log writer, metrics or profiles", i)
+		}
+		// Per-link maps must be distinct, or one link's hold-offs leak.
+		if i > 0 && (&d.held == &links[0].held) {
+			t.Errorf("link %d shares the held map with link 0", i)
+		}
+		// The firewall view stays whole, or rules would name only this car.
+		if len(d.fw.Cars) != 2 {
+			t.Errorf("link %d firewall config sees %d cars, want all 2", i, len(d.fw.Cars))
+		}
+	}
+}
+
+// The single-radio box must still build exactly one link, owning everything.
+func TestBuildLinksSingleRadio(t *testing.T) {
+	cfg := radioConfig(t, `
+phy = phy0
+sta = wlan0
+[car A]
+ssid = BMW00001 CarPlay
+psk = 12345678
+[car B]
+ssid = BMW00002 CarPlay
+psk = 12345678
+`)
+	links := buildLinks(cfg, &evWriter{}, newMetrics(), newProfiles(""))
+	if len(links) != 1 {
+		t.Fatalf("want 1 link, got %d", len(links))
+	}
+	if !links[0].owner || len(links[0].cfg.Cars) != 2 || links[0].cfg.CtrlDir != cfg.CtrlDir {
+		t.Errorf("single-radio link changed shape: owner=%t cars=%d ctrl=%s",
+			links[0].owner, len(links[0].cfg.Cars), links[0].cfg.CtrlDir)
+	}
+}
