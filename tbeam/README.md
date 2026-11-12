@@ -73,26 +73,34 @@ first and restore it afterwards — see `tbeam-supreme-firmware-handoff.md`.
 
 ### The IMU, and what has been ruled out
 
-`WHO_AM_I` reads a constant **`0x3E`**. Five explanations were eliminated with
-evidence on this board:
+`WHO_AM_I` reads a constant **`0x3E`**. The authoritative record of this is
+§9.1 of `tbeam-supreme-firmware-handoff.md`, which goes further than this build
+did — it also rules out 500 kHz and 4 MHz clocks, a dummy byte between address
+and data, and an ALDO2 power cycle, and records the telling detail that the
+returned byte is **address-dependent** (`0x00`–`0x07` read `0x3E`, `0x0F` and
+`0x30`–`0x37` read `0x00`), so the bus is not dead.
+
+What this build confirmed independently, and the one thing it added:
 
 1. **Power** — ALDO2, the sensor rail, reads `on 3300mV` from the PMU.
 2. **Bus contention with the card** — the IMU is probed before the card is ever
    mounted, with `SD_CS` driven high.
 3. **SPI clock mode** — mode 0 and mode 3 both return the *identical* `0x3E`. A
    QMI8658 clocked in the wrong mode returns different garbage per mode.
-4. **The driver** — a hand-rolled transaction and SensorLib's `SensorQMI8658`
-   (the driver LilyGO's own example for this board uses, handed the already-begun
-   SD SPI instance and CS 34) fail identically.
+4. **The driver** — a hand-rolled transaction and, *new here*, SensorLib's
+   `SensorQMI8658::begin(SPIClass&, csPin)` — the driver LilyGO's own example
+   uses, handed the already-begun SD SPI instance and CS 34 — **returns false**.
+   That closes the "just use the official driver" avenue.
 5. **I2C strapping** — a scan of both buses finds `0x3C 0x77 0x7C` and
    `0x34 0x51`. Nothing at 0x6A/0x6B, so it is not an I2C part here.
 
-A stable *non-rail* byte, identical on both clock phases, means something is
-driving MISO that is not a QMI8658 responding. On this board CS GPIO 34 does not
-reach one. That matches the handoff's own open question: the V3.0/V3.1 revision
-was never confirmed from the silkscreen, and §9.1 suspects this revision carries
-a different part on that select line. **The next step is the V3.1 schematic**,
-not more driver work.
+On this board CS GPIO 34 does not reach a QMI8658. **The next step is the
+schematic for this revision, or a logic analyzer on GPIO33–37** — not more
+driver work or register pokes.
+
+Note that the chip id this firmware prints is SensorLib's `getChipID()`, which
+reads the revision register and *cannot* identify the part; `WHO_AM_I` at
+register `0x00` is the only byte that can, and it is what the probe reports.
 
 The firmware reports this rather than hiding it: the MOTION page and the status
 line both print both probe bytes and the conclusion, so the diagnosis travels
