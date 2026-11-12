@@ -32,7 +32,12 @@
 
 static U8G2_SH1106_128X64_NONAME_F_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE);
 static XPowersAXP2101 pmu;
-static SPIClass periphSPI(FSPI);
+// HSPI, not FSPI. On the ESP32-S3 the global `SPI` object is FSPI, so a second
+// SPIClass on FSPI shares a peripheral with whatever else touches `SPI`.
+// LilyGO's own board support declares this bus as `SPIClass SDCardSPI(HSPI)`,
+// and that difference is the only thing separating this firmware's IMU bring-up
+// from the vendor example's.
+static SPIClass periphSPI(HSPI);
 static nmea::Parser gps;
 static sensors::Mag mag;
 static sensors::Imu imu;
@@ -43,6 +48,13 @@ static uint32_t markFlashUntil = 0;
 static uint32_t lastMarkNumber = 0;
 static char lastMarkTime[16] = {0};
 static bool sdOk = false;
+static bool screenOn = true;
+// Motion derived from GPS, because the IMU on this board does not answer (see
+// README). Speed and course deltas give longitudinal acceleration and turn
+// rate, which is most of what a departure analysis wants from the IMU anyway.
+static double lastSpeedMps = 0, lastCourse = 0;
+static uint32_t lastMotionMs = 0;
+static float gpsAccelMps2 = 0, gpsTurnDps = 0;
 
 // ---- power ---------------------------------------------------------------
 //
@@ -60,6 +72,11 @@ static bool powerBegin() {
     pmu.enableBLDO1();  // SD card
     pmu.setALDO3Voltage(3300);
     pmu.enableALDO3();  // OLED / misc
+    // The power key is the board's other button. Short press is ours to use;
+    // a long press is handled by the PMU in hardware and powers the board off.
+    pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+    pmu.clearIrqStatus();
+    pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ | XPOWERS_AXP2101_PKEY_LONG_IRQ);
     pmu.disableTSPinMeasure();
     pmu.enableBattVoltageMeasure();
     pmu.enableVbusVoltageMeasure();
@@ -93,6 +110,35 @@ static void doMark() {
     imu.peakG = 0;  // peak is "since the last mark", which is what a drive wants
     Serial.printf("[mark] %lu %s %dmph\n", (unsigned long)logger.marks, t,
                   (int)(gps.fix.speedMph() + 0.5));
+    // ...and as a machine-readable line, so the recorder's timeline gets the
+    // mark at the instant it happened rather than after the drive.
+    Serial.printf("$CNBMARK,%s,%lu,%.1f,%.6f,%.6f,%.1f\n", t, (unsigned long)logger.marks,
+                  gps.fix.speedMph(), gps.fix.lat, gps.fix.lon,
+                  mag.present ? mag.headingDeg : -1.0f);
+}
+
+// ---- the power key -------------------------------------------------------
+//
+// Short press blanks or unblanks the screen and flushes the card at once. Both
+// matter in a car: the OLED is bright at night, and a flush means the last few
+// seconds are on the card before you pull the power. A long press is the PMU's
+// own hardware power-off and needs no code.
+static void powerKeyPoll() {
+    static uint32_t last = 0;
+    if (millis() - last < 200) return;  // the PMU is on I2C; do not hammer it
+    last = millis();
+    pmu.getIrqStatus();
+    if (pmu.isPekeyShortPressIrq()) {
+        screenOn = !screenOn;
+        logger.flush();
+        Serial.printf("[key] short press: screen %s, log flushed\n", screenOn ? "on" : "off");
+    }
+    if (pmu.isPekeyLongPressIrq()) {
+        // The PMU will cut power itself. Get the card consistent first.
+        Serial.println("[key] long press: flushing before power off");
+        logger.flush();
+    }
+    pmu.clearIrqStatus();
 }
 
 // ---- button: tap marks, hold turns the page -------------------------------
@@ -171,6 +217,7 @@ void loop() {
 
     while (Serial2.available()) gps.feed((char)Serial2.read());
     buttonPoll();
+    powerKeyPoll();
 
     if (now - lastImu >= 1000 / IMU_HZ) {
         lastImu = now;
@@ -181,17 +228,48 @@ void loop() {
     if (now - lastRow >= 1000) {
         lastRow = now;
         mag.read();
+        // Longitudinal acceleration and turn rate from GPS. Only while there is
+        // a fix: without one, speed and course are meaningless rather than zero.
+        if (gps.fix.valid && lastMotionMs != 0) {
+            double dt = (now - lastMotionMs) / 1000.0;
+            double mps = gps.fix.speedKn * 0.514444;
+            if (dt > 0.2) {
+                gpsAccelMps2 = (float)((mps - lastSpeedMps) / dt);
+                double dc = gps.fix.courseDeg - lastCourse;
+                while (dc > 180) dc -= 360;      // shortest way round the circle
+                while (dc < -180) dc += 360;
+                gpsTurnDps = (float)(dc / dt);
+            }
+            lastSpeedMps = mps;
+            lastCourse = gps.fix.courseDeg;
+        } else if (gps.fix.valid) {
+            lastSpeedMps = gps.fix.speedKn * 0.514444;
+            lastCourse = gps.fix.courseDeg;
+        } else {
+            gpsAccelMps2 = gpsTurnDps = 0;
+        }
+        lastMotionMs = now;
         char t[32], line[320];
         isoNow(t, sizeof(t));
         snprintf(line, sizeof(line),
                  "%s,%d,%d,%.6f,%.6f,%.1f,%.2f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,"
-                 "%+.3f,%+.3f,%+.3f,%+.1f,%+.1f,%+.1f,%.3f,%d,%lu",
+                 "%+.3f,%+.3f,%+.3f,%+.1f,%+.1f,%+.1f,%.3f,%d,%lu,%+.2f,%+.1f",
                  t, gps.fix.valid ? 1 : 0, gps.fix.sats, gps.fix.lat, gps.fix.lon, gps.fix.altM,
                  gps.fix.hdop, gps.fix.speedMph(), gps.fix.courseDeg,
                  mag.present ? mag.headingDeg : -1.0f, mag.x, mag.y, mag.z,
                  imu.ax, imu.ay, imu.az, imu.gx, imu.gy, imu.gz, imu.magnitudeG(),
-                 pmu.getBattVoltage(), (unsigned long)(now / 1000));
+                 pmu.getBattVoltage(), (unsigned long)(now / 1000), gpsAccelMps2, gpsTurnDps);
         logger.push(line);
+
+        // One machine-readable line a second for the in-car recorder over USB.
+        // The recorder's Pi has no network in the car, so this is where its log
+        // gets GPS time to align against -- and the recorder writes it down
+        // rather than stepping its clock mid-capture, which would be worse.
+        Serial.printf("$CNB,%s,%d,%d,%.6f,%.6f,%.1f,%.1f,%.2f,%+.2f,%+.1f,%lu,%d\n", t,
+                      gps.fix.valid ? 1 : 0, gps.fix.sats, gps.fix.lat, gps.fix.lon,
+                      gps.fix.speedMph(), mag.present ? mag.headingDeg : -1.0f,
+                      gps.fix.hdop, gpsAccelMps2, gpsTurnDps,
+                      (unsigned long)logger.marks, pmu.getBattVoltage());
     }
 
     if (now - lastFlush >= LOG_FLUSH_MS) {
@@ -244,6 +322,11 @@ void loop() {
 
     if (now - lastDraw >= 200) {
         lastDraw = now;
+        if (!screenOn) {
+            oled.clearBuffer();
+            oled.sendBuffer();
+            return;
+        }
         screens::View v;
         v.page = page;
         v.fix = &gps.fix;
@@ -257,6 +340,8 @@ void loop() {
         v.charging = pmu.isCharging();
         v.chipTempC = temperatureRead();
         v.sdOk = sdOk;
+        v.gpsAccelMps2 = gpsAccelMps2;
+        v.gpsTurnDps = gpsTurnDps;
         v.markFlash = now < markFlashUntil;
         v.markNumber = lastMarkNumber;
         snprintf(v.markTime, sizeof(v.markTime), "%s", lastMarkTime);

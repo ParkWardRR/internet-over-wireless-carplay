@@ -47,7 +47,8 @@ class Log {
         mounted = true;
         appendLine(drivePath_,
                    "iso_time,fix,sats,lat,lon,alt_m,hdop,speed_mph,course_deg,"
-                   "heading_deg,mag_x,mag_y,mag_z,ax,ay,az,gx,gy,gz,g_mag,batt_mv,uptime_s");
+                   "heading_deg,mag_x,mag_y,mag_z,ax,ay,az,gx,gy,gz,g_mag,batt_mv,uptime_s,"
+                   "gps_accel_mps2,gps_turn_dps");
         appendLine(markPath_, "iso_time,mark,speed_mph,lat,lon,heading_deg,g_mag,note");
         return true;
     }

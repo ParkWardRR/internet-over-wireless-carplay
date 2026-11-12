@@ -6,12 +6,18 @@ logs what the recorder cannot see: where the car was, how fast, which way it
 pointed, and how it moved — all stamped with GPS UTC so this log, the
 recorder's, and the garage box's merge on wall clock.
 
-## The button is the point
+## Controls
 
-```
-tap BOOT          mark this instant
-hold BOOT 1.5 s   next page
-```
+Every button does something, and the SYS page prints the legend so the device
+documents itself in the car.
+
+| Control | Action |
+|---|---|
+| **tap BOOT** | **Mark this instant.** Straight to the card with position, speed, heading; full-screen confirmation |
+| **hold BOOT** 1.5 s | Next page |
+| **short press power key** | Blank or unblank the screen, and flush the card immediately. The OLED is bright at night, and a flush means the last seconds are safe before you pull power |
+| **long press power key** | The PMU's own hardware power-off. The firmware flushes the card when it sees the event |
+| **RESET** | Reboot. A new log file pair per boot, so nothing is overwritten |
 
 Tap it the moment CarPlay drops. The instant goes to the card immediately with
 position, speed, heading and acceleration, and the screen confirms it full-size
@@ -42,6 +48,42 @@ Two CSV files per boot under `/carnet` on the microSD (the mesh firmware owns
 
 Writes never block the loop: rows go into a ring, the loop flushes it every two
 seconds, and a missing or failing card fills the ring and increments a counter.
+
+## Driving with no laptop
+
+The Beam and the recorder Pi log a whole trip together, unattended:
+
+```
+power bank ──> recorder Pi ──USB──> CarNet Beam
+                   │                     │
+            carrecon (Wi-Fi)      GPS, compass, marks
+            carnetbridge  <────── $CNB telemetry + $CNBMARK
+```
+
+One cable does power and data. Both services start at boot (`carrecon`,
+`carnetbridge`), so there is nothing to type: apply power and drive.
+
+**Why this solves the clock problem.** In the car the Pi has no network and so
+no NTP, and it has no RTC — a reboot leaves it up to a minute stale. The Beam has
+GPS. Rather than step the Pi's clock mid-capture, which would corrupt the very
+timestamps the analysis merges on, `carnetbridge` writes the Beam's **GPS time
+next to the Pi's own clock every second, with the difference**:
+
+```
+beam gps_time=2026-11-12T02:43:06.000Z fix=1 sats=9 mph=23.4 ... pi_skew_ms=-412
+```
+
+The two logs are then aligned exactly, afterwards, with no risk during the drive.
+GPS time arrives *before* a position fix, so alignment works from the first
+second even underground.
+
+Marks are forwarded the moment they happen, so a tap lands in the recorder's own
+timeline as `beam_mark mark=4 mph=31.2 … pi_skew_ms=-412` rather than being
+reconstructed later. That is what the garage box's `stream_stop` detector finally
+gets to be checked against.
+
+Logs: `/var/lib/carrecon/beam.events` on the Pi, and `/carnet/*.csv` on the
+Beam's own card — two independent copies.
 
 ## Build and flash
 
@@ -94,9 +136,35 @@ What this build confirmed independently, and the one thing it added:
 5. **I2C strapping** — a scan of both buses finds `0x3C 0x77 0x7C` and
    `0x34 0x51`. Nothing at 0x6A/0x6B, so it is not an I2C part here.
 
-On this board CS GPIO 34 does not reach a QMI8658. **The next step is the
-schematic for this revision, or a logic analyzer on GPIO33–37** — not more
-driver work or register pokes.
+**What this does and does not establish.** A byte that is not `0x05` means this
+code did not identify a QMI8658 — it is not a connectivity test, and it does not
+show that GPIO 34 is disconnected or that the part is dead. GPIO 34 *is* the
+documented IMU chip-select on the Supreme. An earlier version of this file
+claimed "CS 34 does not reach a QMI8658"; that was an overclaim from a failed
+register comparison and has been withdrawn.
+
+**The vendor baseline was then run, and it fails too.** LilyGO's own
+`QMI8658_GetDataExample`, unmodified, with its own `setupBoards()` and
+`SPIClass SDCardSPI(HSPI)`, built for `T_BEAM_S3_SUPREME_SX1262` and flashed to
+this board:
+
+```
+UBlox GNSS init succeeded, using UBlox GNSS Module      <- board init worked
+Switching RTC Source to 32.768Khz succeeded
+[E][SensorQMI8658.hpp:385] reset(): Reset chip failed, Response val = 0 - 0x0
+Failed to find QMI8658 - check your wiring!
+```
+
+The vendor's initialisation demonstrably ran: the GNSS and the RTC both came up
+in the same boot. Only the IMU fails, and it fails inside SensorLib's own
+`reset()`, with the reset-result register reading 0 — the same thing a
+hand-rolled driver sees. That is the test LilyGO's support process asks for
+(issue #255) before concluding anything about the hardware, and it rules out
+this firmware as the cause.
+
+It also rules out one thing that looked promising: this firmware originally
+declared its peripheral bus as `SPIClass(FSPI)` while LilyGO uses `HSPI`, and on
+the ESP32-S3 the global `SPI` object is FSPI. Switching to HSPI changed nothing.
 
 Note that the chip id this firmware prints is SensorLib's `getChipID()`, which
 reads the revision register and *cannot* identify the part; `WHO_AM_I` at

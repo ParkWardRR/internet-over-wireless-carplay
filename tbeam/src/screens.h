@@ -44,6 +44,7 @@ struct View {
     bool charging = false;
     float chipTempC = 0;
     bool sdOk = false;
+    float gpsAccelMps2 = 0, gpsTurnDps = 0;   // motion from GPS, used when the IMU is absent
     // Mark confirmation overlay.
     bool markFlash = false;
     uint32_t markNumber = 0;
@@ -143,13 +144,20 @@ static void drawMotion(U8G2 &u, const View &v) {
     char s[40];
     u.setFont(u8g2_font_6x10_tf);
     if (!v.imu || !v.imu->present) {
+        // The IMU does not answer on this board (vendor example fails too), so
+        // this page shows the GPS-derived motion that stands in for it rather
+        // than an empty screen.
         u.setFont(u8g2_font_5x7_tf);
-        u.drawStr(X0, Y0 + 10, "IMU not present");
+        u.drawStr(X0, Y0 + 8, "IMU absent - GPS motion:");
+        u.setFont(u8g2_font_6x10_tf);
+        snprintf(s, sizeof(s), "%+.2f m/s2", v.gpsAccelMps2);
+        u.drawStr(X0, Y0 + 21, s);
+        snprintf(s, sizeof(s), "%+.0f deg/s turn", v.gpsTurnDps);
+        u.drawStr(X0, Y0 + 33, s);
+        u.setFont(u8g2_font_5x7_tf);
         snprintf(s, sizeof(s), "who_am_i 0x%02X", v.imu ? v.imu->whoami : 0);
-        u.drawStr(X0, Y0 + 22, s);
-        if (v.imu) {
-            u.drawStr(X0, Y0 + 34, v.imu->why);
-        }
+        u.drawStr(X0, Y0 + 45, s);
+        u.drawStr(X0, Y0 + H - 1, "see README: hardware");
         return;
     }
     snprintf(s, sizeof(s), "%.2fg peak %.2f", v.imu->magnitudeG(), v.imu->peakG);
@@ -202,6 +210,8 @@ static void drawSys(U8G2 &u, const View &v) {
     snprintf(s, sizeof(s), "imu %s mag %s", v.imu && v.imu->present ? "ok" : "--",
              v.mag && v.mag->present ? "ok" : "--");
     u.drawStr(X0, Y0 + 48, s);
+    u.setFont(u8g2_font_4x6_tf);
+    u.drawStr(X0, Y0 + H - 1, "tap=mark hold=page pwr=screen");
 }
 
 // The overlay. A mark is the whole reason this board is in the car, so the
