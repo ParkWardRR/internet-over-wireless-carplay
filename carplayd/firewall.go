@@ -19,25 +19,34 @@ import (
 // nat66 = nft).
 func nftRuleset(cfg Config, block []netip.Prefix) string {
 	var b strings.Builder
-	sta, up := cfg.STA, cfg.Uplink
+	up := cfg.Uplink
 	b.WriteString("table inet carplayd {}\ndelete table inet carplayd\ntable inet carplayd {\n")
 
 	if cfg.Firewall == "nft" {
-		b.WriteString("\tchain input {\n\t\ttype filter hook input priority -10; policy accept;\n")
-		// Neighbour discovery and RS must reach us; nothing else from the car link
-		// (no SSH, no metrics, no label printer, no DNS on the box).
-		fmt.Fprintf(&b, "\t\tiifname %q meta l4proto ipv6-icmp accept\n", sta)
-		fmt.Fprintf(&b, "\t\tiifname %q drop\n\t}\n", sta)
-
-		b.WriteString("\tchain forward {\n\t\ttype filter hook forward priority -10; policy accept;\n")
-		fmt.Fprintf(&b, "\t\tiifname %q meta nfproto ipv4 drop\n", sta)
 		var nets []string
 		for _, p := range outermost(append(slices.Clone(privateNets), block...)) {
 			nets = append(nets, p.String())
 		}
-		fmt.Fprintf(&b, "\t\tiifname %q ip6 daddr { %s } reject\n", sta, strings.Join(nets, ", "))
-		if up != "" {
-			fmt.Fprintf(&b, "\t\tiifname %q oifname != %q reject\n", sta, up)
+		// Every car link, not just one: with a radio per car an unlisted STA
+		// would be completely unfiltered, which is the opposite of isolation.
+		// Cross-car traffic needs no rule of its own -- the car prefixes are
+		// ULAs inside fc00::/7, which the private-range reject already covers.
+		b.WriteString("\tchain input {\n\t\ttype filter hook input priority -10; policy accept;\n")
+		for _, sta := range cfg.stas() {
+			// Neighbour discovery and RS must reach us; nothing else from the
+			// car link (no SSH, no metrics, no label printer, no DNS on the box).
+			fmt.Fprintf(&b, "\t\tiifname %q meta l4proto ipv6-icmp accept\n", sta)
+			fmt.Fprintf(&b, "\t\tiifname %q drop\n", sta)
+		}
+		b.WriteString("\t}\n")
+
+		b.WriteString("\tchain forward {\n\t\ttype filter hook forward priority -10; policy accept;\n")
+		for _, sta := range cfg.stas() {
+			fmt.Fprintf(&b, "\t\tiifname %q meta nfproto ipv4 drop\n", sta)
+			fmt.Fprintf(&b, "\t\tiifname %q ip6 daddr { %s } reject\n", sta, strings.Join(nets, ", "))
+			if up != "" {
+				fmt.Fprintf(&b, "\t\tiifname %q oifname != %q reject\n", sta, up)
+			}
 		}
 		b.WriteString("\t}\n")
 	}
@@ -52,6 +61,23 @@ func nftRuleset(cfg Config, block []netip.Prefix) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// stas lists the distinct STA netdevs serving cars, in config order. With one
+// radio this is cfg.STA; with a radio per car the firewall must name every one.
+func (cfg Config) stas() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range cfg.Cars {
+		if c.STA != "" && !seen[c.STA] {
+			seen[c.STA] = true
+			out = append(out, c.STA)
+		}
+	}
+	if len(out) == 0 {
+		out = []string{cfg.STA}
+	}
+	return out
 }
 
 // homePrefixes turns `ip -6 route show dev <uplink>` into the prefixes a car

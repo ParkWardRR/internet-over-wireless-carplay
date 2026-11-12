@@ -146,3 +146,75 @@ sta = shared
 		}
 	}
 }
+
+// With a radio per car, every car link must be filtered. An STA the firewall
+// does not name is wide open: a phone on it could reach the box's own services
+// and the home LAN. Cross-car traffic needs no explicit rule, because the car
+// prefixes are ULAs inside fc00::/7 which the private-range reject covers.
+func TestFirewallCoversEveryCarLink(t *testing.T) {
+	cfg := radioConfig(t, `
+phy = phy0
+sta = wlan0
+uplink = eth0
+nat66 = nft
+firewall = nft
+[car A]
+ssid = BMW00001 CarPlay
+psk = 12345678
+phy = phy1
+[car B]
+ssid = BMW00002 CarPlay
+psk = 12345678
+phy = phy2
+[car C]
+ssid = BMW00003 CarPlay
+psk = 12345678
+phy = phy3
+`)
+	rs := nftRuleset(cfg, nil)
+	for _, sta := range []string{"phy1-sta0", "phy2-sta0", "phy3-sta0"} {
+		for _, want := range []string{
+			`iifname "` + sta + `" meta l4proto ipv6-icmp accept`,
+			`iifname "` + sta + `" drop`,
+			`iifname "` + sta + `" meta nfproto ipv4 drop`,
+			`iifname "` + sta + `" oifname != "eth0" reject`,
+		} {
+			if !strings.Contains(rs, want) {
+				t.Errorf("ruleset is missing %q\n%s", want, rs)
+			}
+		}
+		// The ULA reject is what keeps the cars apart from each other.
+		if !strings.Contains(rs, `iifname "`+sta+`" ip6 daddr {`) {
+			t.Errorf("no destination reject for %s", sta)
+		}
+	}
+	// Every car's prefix must be masqueraded, or that car has no internet.
+	for _, c := range cfg.Cars {
+		if !strings.Contains(rs, c.Prefix.String()) {
+			t.Errorf("car %s prefix %s not masqueraded", c.ID, c.Prefix)
+		}
+	}
+	if !strings.Contains(rs, "fc00::/7") {
+		t.Error("fc00::/7 missing: cars could reach each other and the home ULA")
+	}
+}
+
+// The single-radio ruleset must not change shape.
+func TestFirewallSingleRadioUnchanged(t *testing.T) {
+	cfg := radioConfig(t, `
+phy = phy0
+sta = wlan0
+uplink = eth0
+firewall = nft
+[car A]
+ssid = BMW00001 CarPlay
+psk = 12345678
+`)
+	rs := nftRuleset(cfg, nil)
+	if !strings.Contains(rs, `iifname "wlan0" drop`) {
+		t.Errorf("single-radio ruleset lost its STA rules:\n%s", rs)
+	}
+	if strings.Contains(rs, "phy0-sta0") {
+		t.Errorf("single-radio ruleset invented a derived STA name:\n%s", rs)
+	}
+}
