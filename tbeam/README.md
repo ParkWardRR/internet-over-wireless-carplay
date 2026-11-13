@@ -92,7 +92,7 @@ Builds on the build host, never on the Mac. Flashing from the Mac is fine.
 ```sh
 rsync -a tbeam/ <host>:~/builds/carnetbeam/
 ssh <host> 'podman run --rm -v ~/builds/carnetbeam:/work:Z \
-  -v ~/builds/.cache/pio:/root/.platformio:Z -w /work localhost/cairn-pio:1 pio run'
+  -v ~/builds/.cache/pio:/root/.platformio:Z -w /work localhost/pio-build:1 pio run'
 # then, from the Mac, in one invocation with every size "keep":
 esptool --chip esp32s3 -p "$PORT" -b 460800 --before default-reset --after hard-reset \
   write-flash --flash-mode keep --flash-freq keep --flash-size keep \

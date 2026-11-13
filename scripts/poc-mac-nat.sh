@@ -19,7 +19,7 @@
 # Joins with CAR_SSID/CAR_PSK from secrets/carplay.env (gitignored), or, with
 # no PSK, uses the network the Mac is already on (joined via Share Password).
 # Optional: UPLINK=en7 to pick the wired interface by hand.
-# Optional: PREFIX6=2603:8003:4a00:d7ca:: to advertise a routed public /64
+# Optional: PREFIX6=2001:db8:4a00:d7ca:: to advertise a routed public /64
 # instead of the ULA (no NAT66; needs an OPNsense static route + LAN rule,
 # printed by `up`). Use it if the iPhone takes the ULA address but still has
 # no internet: some stacks treat ULA-only networks as having no IPv6.
