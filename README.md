@@ -97,6 +97,11 @@ including a leading hypothesis that the data did not support.
 > you are not left guessing; `validated` confirms the tap took effect. It cost a
 > whole instrumented drive to work this out, which is why it is the first thing
 > in this README after the feature list.
+>
+> Whether a beacon could make the tap unnecessary is an open question with a
+> staged plan and a cheap first test in
+> [docs/ap-signalling.md](docs/ap-signalling.md). Nothing there is measured yet,
+> and the car that works today advertises no internet capability at all.
 
 ## The problem
 
@@ -164,6 +169,7 @@ Sniffing it is out (10 random characters) and so is Bluetooth (encrypted).
 | [docs/usb-radios.md](docs/usb-radios.md) | One radio per car: two USB AR9271 dongles, stable naming, the two traps |
 | [docs/kernel-modules.md](docs/kernel-modules.md) | Building modules the box's vendor kernel left out (TUN, ath9k) |
 | [docs/ipv4-options.md](docs/ipv4-options.md) | Reaching IPv4-only hosts from the car — DNS64 + NAT64, and why a plain DNS relay cannot work |
+| [docs/ap-signalling.md](docs/ap-signalling.md) | Could a beacon make the *Use For Internet* tap unnecessary? Staged experiment, stop/go gates, and why two of the four trials are blocked |
 | [docs/emulator.md](docs/emulator.md), [docs/emulator-results.md](docs/emulator-results.md) | The box firmware emulated on build-host; stock vs carplayd numbers |
 | `carplayd/` | The Go controller (deployed on garage-sbc) |
 | `emu/` | Emulator: OpenWrt image build, `emu.sh`, Go agent + harness |
@@ -178,6 +184,8 @@ Sniffing it is out (10 random characters) and so is Bluetooth (encrypted).
 | `scripts/openwrt-carplay.sh`, [docs/openwrt-box.md](docs/openwrt-box.md) | The OpenWrt replacement |
 | `scripts/poc-mac-nat.sh` | Same on a Mac (rtadvd + pf) |
 | `scripts/car-ie.sh`, `scripts/car-ie.swift` | Beacon decoder for the Mac |
+| `recon/ieaudit/` | Decoder and validator for the Interworking and Apple Device elements: `hex`, `pcap`, `check` |
+| `test-ap/`, `scripts/ap-signal-test.sh` | Controlled hostapd test AP for the signalling experiment, one fragment per trial |
 | `ios/CarNetProbe`, `scripts/install-probe.sh` | iPhone diagnostics app |
 
 ## Rules

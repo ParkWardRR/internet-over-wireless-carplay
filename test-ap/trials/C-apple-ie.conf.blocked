@@ -1,0 +1,27 @@
+# Trials C and D — BLOCKED, and this file does not load.
+#
+# C would be: Interworking internet=0 plus an Apple Device IE in its
+# internet-capable form. D would be both set. Both need a line like
+#
+#   vendor_elements=dd0800a0400000028022
+#
+# and that is exactly the line we must not write yet. hostapd's
+# vendor_elements inserts whatever bytes it is given into beacons and probe
+# responses without checking them; Apple's public material (WWDC17 session 717,
+# 33:25) says the Apple Device IE carries internet state but does not publish
+# its layout. The bit names in recon/ieaudit/apple.go come from third-party
+# copies of an Apple header and from open-source head-unit projects, which is
+# enough to decode a capture and argue about it, and not enough to transmit.
+#
+# A guessed IE produces a trial that cannot be interpreted either way: the phone
+# ignoring it proves nothing if the bytes were wrong, and the phone reacting to
+# it proves nothing about which field did the work.
+#
+# Unblocking condition (docs/ap-signalling.md, gate 3): a capture from a real
+# internet-capable wireless CarPlay head unit, in both its internet-on and
+# internet-off states, decoded by `ieaudit pcap` and showing which octets
+# change. The F32 is not that reference — it transmits no Apple Device IE at
+# all (docs/test-log.md, 2026-11-02).
+#
+# Rename to C-apple-ie.conf only after that capture exists and the bytes below
+# are derived from it rather than from a flag-name table.

@@ -1,0 +1,45 @@
+# Baseline for the AP-signalling experiment (docs/ap-signalling.md).
+#
+# Copy to secrets/ap-test.conf and fill in wpa_passphrase. This file is the
+# constant: it must work, on its own, before any trial fragment is appended to
+# it. Each trial in test-ap/trials/ is only the advertisement delta, so that a
+# difference in the phone's behaviour has exactly one possible cause.
+#
+# Deliberately NOT the car's SSID. Section 33:04 of WWDC17 session 717 says an
+# AP reusing a CarPlay SSID and passphrase is expected to offer the same
+# services, and an internet-only clone of the BMW network is not that. Cloning
+# it here would also make the capture ambiguous about which AP the phone chose.
+#
+#   scripts/ap-signal-test.sh run A
+
+interface=ap0
+driver=nl80211
+ctrl_interface=/run/hostapd
+ctrl_interface_group=0
+
+ssid=carplaywan-test
+# No digits in the SSID: the cars' SSIDs end in VIN digits and the masking in
+# the tooling keys off digit runs. Keeping this one digitless keeps captures
+# from this AP distinguishable from captures of a car at a glance.
+
+country_code=US
+hw_mode=g
+channel=6
+# Channel 6, not the cars' channel 11: this AP must not compete with a real
+# CarPlay link, and the monitor radio has to sit on one channel at a time.
+
+ieee80211n=1
+wmm_enabled=1
+
+auth_algs=1
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+wpa_passphrase=CHANGE-ME
+
+macaddr_acl=0
+ignore_broadcast_ssid=0
+
+# Not enabled here, on purpose: hs20 (Passpoint), ANQP servers, captive-portal
+# redirection, venue name elements. Each changes client behaviour on its own,
+# and the question under test is what one Interworking bit does.

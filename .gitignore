@@ -1,4 +1,5 @@
 secrets/
+captures/
 .DS_Store
 *.pcap
 *.pcapng

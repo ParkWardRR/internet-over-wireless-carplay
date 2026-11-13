@@ -154,6 +154,7 @@ flowchart LR
 | 12 | Ops: crash tests that need hardware (power loss, radio removal, firmware stall) | — | me |
 | 13 | **Git history** still holds the car PSKs and SSID digits from before the scrub (d654b97). Rewrite (filter-repo + force push) or accept | your call | you |
 | 14 | Fallbacks parked: USB-C Ethernet on the phone, offline maps, booster | — | parked |
+| 15 | **AP signalling**: could a beacon remove the *Use For Internet* tap? Staged and gated, nothing measured ([ap-signalling.md](ap-signalling.md)). Gate 0 is one sysdiagnose and could close the whole question before any hardware | an iPhone sysdiagnose while parked | you capture; I read it |
 
 ## Risks
 
