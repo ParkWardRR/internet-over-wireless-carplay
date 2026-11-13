@@ -141,7 +141,13 @@ The simulator can't reproduce brcmfmac/ath11k firmware quirks, iOS behaviour or 
 1. ✅ **build-host emulator** (done differently than planned: the box's own OpenWrt snapshot firmware under KVM with hwsim radios, not a Debian VM; see [emulator.md](emulator.md)). Go harness, 14 scenarios.
 2. ✅ **carplayd** (`carplayd/`): hunter, joiner, RA engine, goodbye, hysteresis, arbitration (S5/S8), phone tracking, NAT66 (ip6tables), wpa_supplicant restart, metrics, unknown-channel hunting. Unit-tested; emulator results in [emulator-results.md](emulator-results.md).
 3. **garage-sbc:** ✅ carplayd deployed (`scripts/deploy-carplayd-sbc.sh`, replaces `carplay-box.sh`; F22 on channel 0 = any until B1). Still to do with the cars: B1, B2, then B3 with stand-ins.
-4. Next: dual-STA if B3 passes, lab pcap ring, B4/B5 on the real cars.
+4. ✅ **One radio per car** (2026-11-13): two USB AR9271 dongles, `car-a` and
+   `car-b`, so both cars are served at once and dual-STA (B3) is moot. carplayd
+   needed no code change — `buildLinks` already runs a daemon per radio. The
+   driver and TUN had to be cross-built against the Orange Pi source first, as
+   the vendor kernel omits both. See [usb-radios.md](usb-radios.md) and
+   [kernel-modules.md](kernel-modules.md). Still to do: lab pcap ring, B4/B5 on
+   the real cars.
 5. **EWS377** (once you have it running): carplayd already runs on the OpenWrt snapshot firmware in the emulator: its own wpa_supplicant on a radio netifd leaves alone, fw4 zone + masq6, procd init (`carplayd/dist/carplayd.init`). On the device: check ath11k STA with NSS offload, `iw phy` limits, then mount it in the garage. Peer coordination with garage-sbc (S12).
 6. **Production mode:** polling trimmed to presence + RSSI, captures off, metrics and alerts kept.
 
@@ -149,6 +155,7 @@ The simulator can't reproduce brcmfmac/ath11k firmware quirks, iOS behaviour or 
 
 - F22: same head unit, channel, security? (B1)
 - Can garage-sbc in the basement reach the F22 reliably? (B2) If not, the F22 waits for the EWS in the garage.
-- brcmfmac dual STA in practice (B3).
+- ~~brcmfmac dual STA in practice (B3)~~ — moot: each car has its own USB
+  AR9271 now ([usb-radios.md](usb-radios.md)). The onboard Broadcom is free.
 - Does iOS keep *Use For Internet* per network across days (L2), and does a phone that moves between cars need anything extra?
 - With both cars on the same channel, do their beacons/traffic interfere enough to matter? (B5)

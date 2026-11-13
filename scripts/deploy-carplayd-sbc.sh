@@ -37,15 +37,18 @@ rsync -a --delete --exclude secrets/ --exclude .git/ --exclude emu/out/ --exclud
 	"$HERE/" "$BUILD:builds/carplay-deploy/"
 # scripts/release.sh, not a bespoke build line: whatever lands on the box has to
 # be reproducible from the tree, and it gofmt/vet/race-tests before it builds.
-ssh "$BUILD" 'cd ~/builds/carplay-deploy && rm -f out/carplayd-linux-arm64 && scripts/release.sh carplayd > out/deploy-build.log 2>&1; s=$?; tail -3 out/deploy-build.log; [ $s -eq 0 ] && [ -s out/carplayd-linux-arm64 ]' || { echo "build failed on $BUILD (see ~/builds/carplay-deploy/out/deploy-build.log); nothing deployed" >&2; exit 1; }
+ssh "$BUILD" 'cd ~/builds/carplay-deploy && mkdir -p out && rm -f out/carplayd-linux-arm64 && scripts/release.sh carplayd > out/deploy-build.log 2>&1; s=$?; tail -3 out/deploy-build.log; [ $s -eq 0 ] && [ -s out/carplayd-linux-arm64 ]' || { echo "build failed on $BUILD (see ~/builds/carplay-deploy/out/deploy-build.log); nothing deployed" >&2; exit 1; }
 scp -q "$BUILD:builds/carplay-deploy/out/carplayd-linux-arm64" "$TMP/carplayd"
 
 # The F32 is car B in secrets (BMW#####), the F22 car A (BMW#####); carplayd
 # calls the F32 "A" (priority) and the F22 "B".
 umask 077
 cat > "$TMP/carplayd.conf" <<CONF
-phy = phy0
-sta = wlan0
+# Unused when every car names its own radio below, and kept off a bare phyN
+# on purpose: USB probe order decides that numbering, so the onboard radio
+# was phy0 before the dongles and phy1 after. docs/usb-radios.md
+phy = ${CAR_A_PHY:-phy0}
+sta = ${CAR_A_STA:-wlan0}
 uplink = eth0
 nat66 = nft
 firewall = nft
@@ -69,6 +72,15 @@ debug = ${DEBUG:-off}
 # fallback used until a car has 120 healthy samples.
 learn = ${LEARN:-on}
 state = /var/lib/carplayd/learned.json
+${NAT64:+
+# DNS64/NAT64, so a phone on a car link can reach IPv4-only hosts on the home
+# LAN. The prefix is out of our own space, never 64:ff9b::/96, which RFC 6052
+# 3.1 forbids for the RFC 1918 targets these all are. nat64_allow is an
+# allowlist, one /128 per host in the ruleset, so widening the hole into the
+# home LAN is a config change and never an accident. Needs a translator
+# (tayga) and a DNS64 resolver (unbound) on the box: docs/ipv4-options.md.
+nat64 = $NAT64}
+${NAT64_ALLOW:+nat64_allow = $NAT64_ALLOW}
 
 [car A]
 ssid = $CAR_B_SSID
@@ -95,22 +107,36 @@ ${CAR_B_PHY:+phy = $CAR_B_PHY}
 ${CAR_B_STA:+sta = $CAR_B_STA}
 CONF
 
-scp -q "$TMP/carplayd" "$TMP/carplayd.conf" "$HERE/carplayd/dist/carplayd.service" "$SBC:/tmp/"
+# NetworkManager must not claim any radio carplayd drives. That means the STA
+# netdevs it creates *and*, with USB radios, the default wlx<mac> vif the
+# driver makes at probe time (NM_EXTRA_UNMANAGED in secrets/carplay.env).
+# This file used to be written inline as just wlan0, which silently un-managed
+# the dongles on the next deploy and broke them: docs/usb-radios.md.
+NM_UNMANAGED="interface-name:wlan0"
+for i in "${CAR_A_STA:-}" "${CAR_B_STA:-}"; do
+	[ -n "$i" ] && NM_UNMANAGED="$NM_UNMANAGED;interface-name:$i"
+done
+for i in ${NM_EXTRA_UNMANAGED:-}; do
+	NM_UNMANAGED="$NM_UNMANAGED;interface-name:$i"
+done
+printf "[keyfile]\nunmanaged-devices=%s\n" "$NM_UNMANAGED" > "$TMP/90-carplayd.conf"
+
+scp -q "$TMP/carplayd" "$TMP/carplayd.conf" "$TMP/90-carplayd.conf" "$HERE/carplayd/dist/carplayd.service" "$SBC:/tmp/"
 ssh "$SBC" 'set -e
 # carplayd isolates the car link and NATs with its own nftables table.
 [ -x /usr/sbin/nft ] || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q nftables >/dev/null
 sudo install -m 755 /tmp/carplayd /usr/local/sbin/carplayd
 sudo install -m 600 /tmp/carplayd.conf /etc/carplayd.conf
 sudo install -m 644 /tmp/carplayd.service /etc/systemd/system/carplayd.service
+sudo install -m 644 /tmp/90-carplayd.conf /etc/NetworkManager/conf.d/90-carplayd.conf
 # Lab survey writes ~1 line per car per 10 s: rotate daily, keep 14 days.
 # On the SD card, not /var/log: Armbian keeps /var/log in RAM (zram), which
 # a power cut loses.
 sudo mkdir -p /var/lib/carplayd; [ -f /var/log/carplayd.events ] && sudo sh -c "cat /var/log/carplayd.events >> /var/lib/carplayd/events.log && rm /var/log/carplayd.events" || true
 printf "/var/lib/carplayd/events.log {\n\tdaily\n\trotate 14\n\tcompress\n\tdelaycompress\n\tmissingok\n\tnotifempty\n\tcopytruncate\n}\n" | sudo tee /etc/logrotate.d/carplayd >/dev/null
-rm -f /tmp/carplayd /tmp/carplayd.conf /tmp/carplayd.service
+rm -f /tmp/carplayd /tmp/carplayd.conf /tmp/90-carplayd.conf /tmp/carplayd.service
 /usr/local/sbin/carplayd -c /etc/carplayd.conf -check >/dev/null 2>&1 || sudo /usr/local/sbin/carplayd -c /etc/carplayd.conf -check | tail -3
 [ -x ~/carplay-poc/carplay-box.sh ] && (cd ~/carplay-poc && sudo ./carplay-box.sh uninstall) || true
-printf "[keyfile]\nunmanaged-devices=interface-name:wlan0\n" | sudo tee /etc/NetworkManager/conf.d/90-carplayd.conf >/dev/null
 sudo nmcli general reload; sudo nmcli dev set wlan0 managed no 2>/dev/null || true
 sudo systemctl daemon-reload
 sudo systemctl enable carplayd >/dev/null 2>&1
