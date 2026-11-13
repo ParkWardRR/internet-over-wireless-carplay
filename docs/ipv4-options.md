@@ -45,7 +45,8 @@ helps, which is DNS64, and it is only useful paired with a NAT64 translator.
 ### What is built
 
 `carplayd` gained `nat64 = <prefix>/96` and `nat64_allow = <IPv4 hosts>`
-(committed 4d6664a, tests in `carplayd/nat64_test.go`). When set it:
+(commit *feat(carplayd): reach IPv4-only LAN hosts via DNS64/NAT64*, tests in
+`carplayd/nat64_test.go`). When set it:
 
 - emits an nftables **accept for each allowed host's synthesised /128**, placed
   ahead of every reject — the NAT64 /96 lives inside `fc00::/7`, and a

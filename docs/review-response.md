@@ -34,7 +34,7 @@ An outside reviewer audited [status.md](status.md) against the RFCs, Apple's doc
 | Nobody published this before us | We found no matching public implementation in the searches listed in findings.md |
 | *Use For Internet* lifts PrimaryRank | Hypothesis from Apple's open-source configd; not traced on the device |
 | iOS 27 beta 3 introduced it | Per a betaprofiles forum post; not independently confirmed |
-| SSID digits kept out of git | They weren't: car PSKs were in a test file and SSID digits in six files. Scrubbed (d654b97) and a pre-commit hook now blocks them. Earlier commits still contain them (see below) |
+| SSID digits kept out of git | They weren't: car PSKs were in a test file and SSID digits in six files. Scrubbed in *security: scrub car PSKs and SSID digits from tracked files* and a pre-commit hook now blocks them. The history was rewritten on 2026-11-13 (see below) |
 
 ## Security and operations
 
@@ -47,7 +47,7 @@ An outside reviewer audited [status.md](status.md) against the RFCs, Apple's doc
 | Phone count ≠ address count | **Done:** counted by unique MAC |
 | Logs/captures: bounded, redacted | Open: the events file isn't rotated yet; captures stay in `secrets/` |
 | Rollback | `deploy-carplayd-sbc.sh rollback` on garage-sbc (removes the nft table too). EWS377 rollback: open |
-| Git history | The scrub fixed the tree, not the history; rewriting it (filter-repo + force push) is the user's call |
+| Git history | **Rewritten 2026-11-13** (`git filter-repo --replace-text`, force push). All four values — both cars' PSKs and both SSID digit groups — are now absent from all 88 commits on every ref, and the current tree hash is unchanged, so only historical blobs moved. **The rewrite does not un-publish them:** the repo was public from 2026-11-04 to 2026-11-13, so the PSKs must be treated as disclosed until the cars are re-paired, which regenerates them. Commit hashes before 2026-11-03 changed; docs now cite commits by subject, because this is the second rewrite to invalidate a quoted hash |
 
 ## What we didn't change
 
