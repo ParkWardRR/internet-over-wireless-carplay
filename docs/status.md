@@ -1,6 +1,6 @@
 # Status: what we learned, tested, built, plan, open items
 
-*As of 2026-11-03, revised after an external review ([review-response.md](review-response.md)).* Goal: Google Maps, and as much else as possible, on wireless CarPlay in the underground garage where there's no cellular. Two cars: the **F32** and the **F22 M240i** (SSIDs `BMW##### CarPlay`; the digits are VIN digits and stay in `secrets/`).
+*As of 2026-11-13 (At a glance); the detail sections below still carry their 2026-11-03 dates and were revised after an external review ([review-response.md](review-response.md)).* Goal: Google Maps, and as much else as possible, on wireless CarPlay in the underground garage where there's no cellular. Two cars: the **F32** and the **F22 M240i** (SSIDs `BMW##### CarPlay`; the digits are VIN digits and stay in `secrets/`).
 
 Claims are labelled: **measured** (on the car, phone or box), **source** (code or docs we read), **emulator** (hwsim, Linux stand-in hosts), **inferred**.
 
@@ -9,9 +9,11 @@ Claims are labelled: **measured** (on the car, phone or box), **source** (code o
 | | |
 |---|---|
 | **Proven** | On the tested **F32**, an iPhone (iOS 27.0.1) on the wireless CarPlay network used an added IPv6 internet gateway: *Check For Internet Access → Use For Internet*, then Google Maps search and routing. The phone's IPv4 settings were unchanged (2026-11-02, P2, measured) |
-| **Not yet proven** | Unattended repeatability with carplayd on a real car · cellular handoff timing on the real iPhone · whether iOS remembers *Use For Internet* · app-wide compatibility (IPv4-only services) · F22 equivalence · EWS377 firmware reliability · two-box failover |
-| **Running now** | **carplayd** (our Go controller) on **garage-sbc**, the Banana Pi in the basement, hunting both cars: a scan every 1 s on channel 11, with a full 2.4 GHz sweep every 5th scan for the F22. **Survey mode** since 2026-11-03: each visible car's signal every 10 s, plus seen/gone, to `/var/lib/carplayd/events.log` (SD card, rotated daily, 14 days kept). Not yet exercised on a real car |
-| **Next** | An F32 run with cellular off and carplayd, then a departure with cellular on (time to the first new request over cellular) |
+| **Answered since** | **iOS does not remember *Use For Internet*** — it must be re-tapped after every car restart, and until it is, apps get nothing while every box-side metric reads healthy (2026-11-11 capture, confirmed live 2026-11-12 by watching `probe_A` go 0 → 15 the moment it was tapped) |
+| **Not yet proven** | Unattended repeatability with carplayd on a real car · cellular handoff timing on the real iPhone · F22 equivalence · EWS377 firmware reliability · two-box failover · **association on the two new USB radios**, and **a phone actually using NAT64** — both were built and verified from the box while the cars were away |
+| **Fixed since** | IPv4-only hosts on the home LAN are reachable from a car link: DNS64 + NAT64 on the box, allowlisted to three hosts ([ipv4-options.md](ipv4-options.md)). This is the app-wide compatibility gap that used to sit under *Not yet proven* |
+| **Running now** | **carplayd** on **garage-sbc** (an Orange Pi 4A, Allwinner T527, in the basement), serving **one radio per car**: two USB AR9271 dongles, `car-a` and `car-b`, so both cars can be served at once rather than time-shared ([usb-radios.md](usb-radios.md)). Driver and TUN had to be cross-built — the vendor kernel ships neither ([kernel-modules.md](kernel-modules.md)). Events to `/var/lib/carplayd/events.log`, rotated daily, 14 days kept |
+| **Next** | **One drive with a car present**, which settles the three things standing open at once: association on the two new USB radios, a phone actually using NAT64 to reach `nas`/`media`/`dns`, and whether both cars can be served at the same time |
 
 ## What we learned
 

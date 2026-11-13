@@ -114,7 +114,7 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 | Two kinds of wireless CarPlay car. **Wi-Fi pairing**: CarPlay over the car's normal hotspot, so the phone uses hotspot data. **Bluetooth pairing**: a private CarPlay-only network with no internet. BMW's NBT EVO is the second kind | Audi TSBs [2021](https://static.nhtsa.gov/odi/tsbs/2021/MC-10189148-0001.pdf), [2024](https://static.nhtsa.gov/odi/tsbs/2024/MC-10250567-0001.pdf) | ✅ |
 | Why a CarPlay network normally carries no internet: configd gives a service ranked `Never` only a scoped default route (wired CarPlay is `Never`); *Use For Internet* presumably lifts it (hypothesis, not traced on the device). Darwin asks for AAAA on a ULA-only network, so no public prefix is needed | Apple's open-source configd, Libinfo, xnu ([iphone-diagnostics.md](docs/iphone-diagnostics.md#reading-the-probes)) | ✅ |
 | Home LAN is 172.16.0.0/16, which overlaps the car's 172.16.224.0/24. Harmless: nothing at home uses .224.x, the box NATs, and the scripts refuse to start unless they really got a car address | Kea config | |
-| Home has native IPv6 (Spectrum); Google Maps answers over IPv6. A few hosts are IPv4-only (`gsp1.apple.com`, push, Mapbox): DNS64 + NAT64 would cover them | AAAA lookups ([ipv6-route.md](docs/ipv6-route.md)) | ✅ |
+| Home has native IPv6 (the ISP); Google Maps answers over IPv6. A few hosts are IPv4-only (`gsp1.apple.com`, push, Mapbox): DNS64 + NAT64 would cover them — as would **IPv4-only hosts on your own LAN**, which is the case that actually bit ([ipv4-options.md](docs/ipv4-options.md) option E) | AAAA lookups ([ipv6-route.md](docs/ipv6-route.md)) | ✅ |
 
 ## Approaches
 
@@ -137,7 +137,7 @@ Wireless CarPlay puts the iPhone's Wi-Fi on the car's own access point (`BMW<5 d
 | **P2** | Proof of concept: garage-sbc in the car, `poc-linux.sh up`; Check For Internet Access → Use For Internet; Maps | ✅ works; traffic, latency and goodbye RA checked |
 | **P3** | Permanent box. **Interim: garage-sbc in the garage, automatic** (`scripts/carplay-box.sh`: NM auto-joins the car Wi-Fi, a dispatcher hook starts radvd + NAT). **Final: an OpenWrt router** ([docs/openwrt-box.md](docs/openwrt-box.md), `scripts/openwrt-carplay.sh`) | **carplayd** running on garage-sbc since 2026-11-03 (replaced carplay-box.sh); OpenWrt/EWS377 to do |
 | **L / P** | **Lab telemetry, then fast connect / leave / reconnect for one or both cars** on the EnGenius EWS377AP (OpenWrt, IPQ8072A): [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | planned |
-| **2C** | **Two cars** (F32 + F22): per-car ULA, no IPv4 on car links, carplayd, build-host hwsim simulator, F22 survey from garage-sbc ([docs/two-cars.md](docs/two-cars.md)) | carplayd handles both; F22 channel + survey pending |
+| **2C** | **Two cars** (F32 + F22): per-car ULA, no IPv4 on car links, carplayd, build-host hwsim simulator, F22 survey from garage-sbc ([docs/two-cars.md](docs/two-cars.md)) | **One radio per car** since 2026-11-13 — two USB AR9271 dongles, so both are served at once instead of time-shared ([docs/usb-radios.md](docs/usb-radios.md)). Association on them still untested |
 | **P4** | Exit test: drive out, time the return to cellular (60 s router lifetime) | to do |
 | **P4b** | Restart test: does iOS remember *Use For Internet* across car restarts? | to do |
 | **P5** | OBD ENET exploration | optional |
@@ -161,6 +161,9 @@ Sniffing it is out (10 random characters) and so is Bluetooth (encrypted).
 | [docs/findings.md](docs/findings.md) | What we learned and why it works |
 | [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | Lab telemetry + fast connect/leave/reconnect plan (EnGenius OpenWrt) |
 | [docs/two-cars.md](docs/two-cars.md) | F32 + F22: scenarios, per-car prefixes, carplayd, radios, arbitration, build-host simulator |
+| [docs/usb-radios.md](docs/usb-radios.md) | One radio per car: two USB AR9271 dongles, stable naming, the two traps |
+| [docs/kernel-modules.md](docs/kernel-modules.md) | Building modules the box's vendor kernel left out (TUN, ath9k) |
+| [docs/ipv4-options.md](docs/ipv4-options.md) | Reaching IPv4-only hosts from the car — DNS64 + NAT64, and why a plain DNS relay cannot work |
 | [docs/emulator.md](docs/emulator.md), [docs/emulator-results.md](docs/emulator-results.md) | The box firmware emulated on build-host; stock vs carplayd numbers |
 | `carplayd/` | The Go controller (deployed on garage-sbc) |
 | `emu/` | Emulator: OpenWrt image build, `emu.sh`, Go agent + harness |
