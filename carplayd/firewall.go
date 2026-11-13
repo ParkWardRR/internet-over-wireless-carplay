@@ -35,8 +35,16 @@ func nftRuleset(cfg Config, block []netip.Prefix) string {
 		b.WriteString("\tchain input {\n\t\ttype filter hook input priority -10; policy accept;\n")
 		for _, sta := range cfg.stas() {
 			// Neighbour discovery and RS must reach us; nothing else from the
-			// car link (no SSH, no metrics, no label printer, no DNS on the box).
+			// car link (no SSH, no metrics, no label printer).
 			fmt.Fprintf(&b, "\t\tiifname %q meta l4proto ipv6-icmp accept\n", sta)
+			// DNS on the box is otherwise deliberately closed. NAT64 is the one
+			// case that needs it open: a synthesised AAAA only exists if the
+			// phone asks our DNS64 resolver, so with nat64 set the RA advertises
+			// the box as the only RDNSS and this is the port it points at.
+			if cfg.NAT64.IsValid() {
+				fmt.Fprintf(&b, "\t\tiifname %q udp dport 53 accept\n", sta)
+				fmt.Fprintf(&b, "\t\tiifname %q tcp dport 53 accept\n", sta)
+			}
 			fmt.Fprintf(&b, "\t\tiifname %q drop\n", sta)
 		}
 		b.WriteString("\t}\n")
@@ -74,7 +82,20 @@ func nftRuleset(cfg Config, block []netip.Prefix) string {
 			fmt.Fprintf(&b, "\t\tiifname %q ip6 saddr %s counter name \"fwd_%s\"\n", sta, c.Prefix, counterID(c.ID))
 			fmt.Fprintf(&b, "\t\tiifname %q ip6 saddr %s tcp dport 80 counter name \"probe_%s\"\n", sta, c.Prefix, counterID(c.ID))
 		}
+		// The NAT64 exception, before every reject below: these destinations
+		// sit inside the NAT64 /96, which is inside fc00::/7, which the
+		// private-range reject covers -- and they leave by the translator's
+		// tun device, not the uplink, so the oifname reject would catch them
+		// too. Only the hosts in nat64_allow are listed, one /128 each, so
+		// widening the hole is a config change and never an accident.
+		var synth []string
+		for _, a := range cfg.NAT64Allow {
+			synth = append(synth, nat64Addr(cfg.NAT64, a).String())
+		}
 		for _, sta := range cfg.stas() {
+			if len(synth) > 0 {
+				fmt.Fprintf(&b, "\t\tiifname %q ip6 daddr { %s } accept\n", sta, strings.Join(synth, ", "))
+			}
 			fmt.Fprintf(&b, "\t\tiifname %q meta nfproto ipv4 drop\n", sta)
 			fmt.Fprintf(&b, "\t\tiifname %q ip6 daddr { %s } reject\n", sta, strings.Join(nets, ", "))
 			if up != "" {
@@ -94,6 +115,18 @@ func nftRuleset(cfg Config, block []netip.Prefix) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// nat64Addr embeds an IPv4 address in a NAT64 /96, which RFC 6052 §2.2 defines
+// as the four octets in the last four bytes and no suffix. 10.0.0.21 under
+// fd5c:ba1e:f32:64::/96 is fd5c:ba1e:f32:64::a00:15 -- the same arithmetic
+// the DNS64 resolver does when it synthesises the AAAA, so the address the
+// phone dials is the address this ruleset permits.
+func nat64Addr(prefix netip.Prefix, v4 netip.Addr) netip.Addr {
+	b := prefix.Masked().Addr().As16()
+	v := v4.As4()
+	copy(b[12:], v[:])
+	return netip.AddrFrom16(b)
 }
 
 // counterID makes an nftables identifier out of a car ID, which is free-form

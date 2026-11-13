@@ -560,6 +560,22 @@ func (d *daemon) onConnected() {
 	d.startServing(car)
 }
 
+// raDNSFor is the RDNSS list to advertise on one car's link.
+//
+// With NAT64 on, the box itself is the only resolver we advertise. A
+// synthesised AAAA for an IPv4-only host exists only in our own DNS64, so a
+// phone that picked a public RDNSS instead would get the real A record, dial an
+// address its car link cannot route, and fail -- intermittently, depending on
+// which of the advertised servers it happened to choose. Offering both would be
+// worse than offering neither, so the list is replaced and not appended to.
+// cfg.DNS stays what the box's resolver forwards to and what health checks dial.
+func raDNSFor(cfg Config, car *Car) []netip.Addr {
+	if !cfg.NAT64.IsValid() {
+		return cfg.DNS
+	}
+	return []netip.Addr{car.Prefix.Addr().Next()} // <prefix>::1, the address startServing adds
+}
+
 func (d *daemon) startServing(car *Car) {
 	addr := car.Prefix.Addr().Next().String() + "/64" // <prefix>::1
 	if err := run("ip", "-6", "addr", "replace", addr, "dev", d.cfg.STA, "nodad"); err != nil {
@@ -570,7 +586,7 @@ func (d *daemon) startServing(car *Car) {
 	ra, err := newRASender(d.cfg.STA, raParams{
 		RouterLife: d.cfg.RouterLife, Prefix: car.Prefix,
 		ValidLife: 24 * time.Hour, PreferredLife: 30 * time.Minute,
-		DNS: d.cfg.DNS, DNSLife: dnsLife(d.cfg),
+		DNS: raDNSFor(d.cfg, car), DNSLife: dnsLife(d.cfg),
 	}, d.cfg.RAInterval, func(name string, args ...string) { d.ev(name, append([]string{id}, args...)...) })
 	if err != nil {
 		d.ev("error", "ra", err.Error())

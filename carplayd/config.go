@@ -51,7 +51,9 @@ type Config struct {
 	LeaveFor      time.Duration // how long below Leave before leaving
 	RAInterval    time.Duration // MaxRtrAdvInterval: periodic RAs every random [0.75, 1] × this (RFC 4861)
 	RouterLife    time.Duration // RA router lifetime
-	DNS           []netip.Addr  // RDNSS servers
+	DNS           []netip.Addr  // upstream RDNSS servers, and the default health targets. With nat64 set the RA advertises the box instead, and these stay as what the box's own resolver forwards to.
+	NAT64         netip.Prefix  // /96 that a local DNS64/NAT64 pair maps onto IPv4 (invalid = off)
+	NAT64Allow    []netip.Addr  // the only IPv4 hosts a car may reach through NAT64
 	EventsPath    string        // EV lines are appended here too
 	WPABinary     string
 	Uplink        string         // interface toward the internet (for nat66)
@@ -153,6 +155,20 @@ func parseConfig(r io.Reader) (Config, error) {
 	if len(cfg.HealthTargets) == 0 {
 		for _, d := range cfg.DNS {
 			cfg.HealthTargets = append(cfg.HealthTargets, netip.AddrPortFrom(d, 53).String())
+		}
+	}
+	if len(cfg.NAT64Allow) > 0 && !cfg.NAT64.IsValid() {
+		return cfg, fmt.Errorf("nat64_allow needs nat64 = <prefix>/96")
+	}
+	// RFC 6052 §3.1: the well-known prefix must not be used to translate a
+	// non-global address, and every host worth reaching here is RFC 1918.
+	// Using it anyway would make our synthesised addresses collide with any
+	// other NAT64 the phone meets on a real network.
+	if cfg.NAT64.IsValid() && cfg.NAT64 == netip.MustParsePrefix("64:ff9b::/96") {
+		for _, a := range cfg.NAT64Allow {
+			if a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() {
+				return cfg, fmt.Errorf("nat64 = 64:ff9b::/96 (the well-known prefix) must not translate the non-global %s (RFC 6052 §3.1); use a prefix out of your own space", a)
+			}
 		}
 	}
 	if len(cfg.Cars) == 0 {
@@ -330,6 +346,25 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 				return fmt.Errorf("dns %q: not an IPv6 address", s)
 			}
 			cfg.DNS = append(cfg.DNS, a)
+		}
+	case "nat64":
+		p, perr := netip.ParsePrefix(v)
+		if perr != nil || !p.Addr().Is6() {
+			return fmt.Errorf("nat64 %q: not an IPv6 prefix", v)
+		}
+		// RFC 6052 §2.2 only defines the embedding this translates for /32,
+		// /40, /48, /56, /64 and /96, and every NAT64 in Debian speaks /96.
+		if p.Bits() != 96 {
+			return fmt.Errorf("nat64 %q: must be a /96", v)
+		}
+		cfg.NAT64 = p.Masked()
+	case "nat64_allow":
+		for _, s := range splitList(v) {
+			a, perr := netip.ParseAddr(s)
+			if perr != nil || !a.Is4() {
+				return fmt.Errorf("nat64_allow %q: not an IPv4 address", s)
+			}
+			cfg.NAT64Allow = append(cfg.NAT64Allow, a)
 		}
 	default:
 		return fmt.Errorf("unknown key %q", k)
