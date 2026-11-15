@@ -17,77 +17,76 @@
 [![BMW](https://img.shields.io/badge/BMW-NBT%20EVO-1C69D4?logo=bmw&logoColor=white)](https://www.bmw.com/)
 [![CarPlay](https://img.shields.io/badge/CarPlay-wireless-000000?logo=appleplay&logoColor=white)](https://www.apple.com/ios/carplay/)
 [![Status](https://img.shields.io/badge/status-one%20car%20proven%2C%20second%20pending-orange)](https://github.com/ParkWardRR/internet-over-wireless-carplay/blob/main/docs/status.md)
-[![Wi-Fi](https://img.shields.io/badge/Wi--Fi-802.11n%202.4%20GHz-blue)](https://en.wikipedia.org/wiki/IEEE_802.11n)
-[![IPv6](https://img.shields.io/badge/IPv6-RA%20%2B%20NAT66-2EA82E)](https://en.wikipedia.org/wiki/IPv6)
 
-**Give your iPhone real internet on wireless CarPlay, in a garage with no cell signal.**
+**Get internet on wireless CarPlay in a garage with no cell signal.**
 
-Wireless CarPlay works by having the car run its own little Wi-Fi network, just for the phone and the dashboard. That network deliberately carries no internet — the car is not a hotspot, it is a cable replacement. Normally that is invisible, because your phone keeps using cellular for everything that needs the network. Park underground, lose cellular, and the illusion breaks: CarPlay still shows Maps, but Maps cannot search, cannot route, and cannot load a tile.
+Your car's wireless CarPlay runs its own little Wi-Fi network. It carries no internet — it is a cable replacement, not a hotspot. Normally you never notice, because your phone uses cellular for everything else. Park underground and that stops working: CarPlay still shows Maps, but Maps can't search, route, or load a tile.
 
-This project puts a small Linux box on that same car network as a second client, and has it hand the phone a working IPv6 route out to a wired internet connection. The car is untouched. The phone's IP settings are untouched. You tap one switch on the phone the first time, and Maps works underground.
+This puts a small Linux box on that same car network and hands your phone a route out to a wired internet connection. The car is not modified. Your phone's IP settings are not changed. You tap one switch the first time.
 
-> [!NOTE]
-> **This is a working experiment, not a product.** It is proven end to end on two separate cars' hardware, but never yet on both at the same time, and the second car's proof is four days old. Read *Where this stands* before you build one. Everything in this repo is dated and sourced; where something is believed rather than measured, it says so.
+## What you need
 
-## Where this stands
+- A small Linux box — Raspberry Pi, Orange Pi, or similar.
+- Wired Ethernet from that box to your internet.
+- A 2.4 GHz USB Wi-Fi adapter that can run as a client. **One per car** — they can't be shared.
+- An iPhone on **iOS 27 or newer**. The *Use For Internet* switch does not exist before that.
+- The car's CarPlay Wi-Fi password.
 
-Measured on the box and the phone, not inferred. Full detail: [docs/status.md](docs/status.md), raw log: [docs/test-log.md](docs/test-log.md).
+## Set it up
 
-| | F22 M240i (`car B`) | F32 (`car A`) |
-|---|---|---|
-| **Box joins the car's CarPlay Wi-Fi** | ✅ repeatedly, 2026-11-14, on its own USB radio | ✅ 2026-11-02/03, on the old shared radio |
-| **Phone gets a route and real app traffic** | ✅ **44,327 packets / 6.2 MB forwarded** in one day, 5 × `validated` | ✅ 2026-11-02, Maps search + routing on CarPlay |
-| **On the current two-radio build** | ✅ this is the build in service | ⬜ **never served** — the car has not been in RF range during any logged window |
-| **Clean departures (goodbye before the link dies)** | ✅ 3/3 on a real drive | ⚠️ 1 early departure stranded a route; fixed and re-tested on the F22 only |
+**1. Get the CarPlay Wi-Fi password.**
+On the iPhone: Settings → Wi-Fi → Edit → Known Networks → the car's network → Password. Face ID, then Copy. No jailbreak needed.
 
-So: **one car at a time is proven, and "both cars at once" is not.** The two cars have never been served simultaneously, because they have not been in the garage together since the per-car radios went in on 2026-11-13. The F32 is simply away — its radio on the box is healthy (`cara` sees 23 neighbouring networks, same as `carb`) and its `wpa_supplicant` is hunting; the car's SSID has just never appeared in a scan.
+**2. Put it in `secrets/carplay.env`.** Copy `secrets.example.env` as a template:
 
-Also still unproven, despite being built and deployed: **a real phone using NAT64** to reach IPv4-only hosts. The translator is up and five names resolve, but its tunnel has carried **3 packets, all outbound** — no phone has ever used it.
+```
+CAR_SSID='BMW12345 CarPlay'
+CAR_PSK='your-password-here'
+```
 
-## The one thing that will catch you out
+**3. Install on the box:**
 
-iOS gives a CarPlay network the service rank `Never`. It gets a scoped route and nothing more, which is enough for background daemons and useless for your apps. The box can be flawless and Maps will still fail.
+```sh
+sudo scripts/carplay-box.sh install
+```
 
-That is what the tap at the top of this page is for, and it is the whole reason the box is not enough on its own.
+The box now joins that car whenever it appears, and shares the wired connection automatically. For a one-shot test instead, run `scripts/poc-linux.sh up`.
 
-**After that first tap, iOS mostly re-validates by itself** — this is new as of 2026-11-14 and is the main thing that changed since the earlier write-ups. Across separate serving sessions on the F22, separated by 15–29 minutes of the car being gone, the box saw the phone re-validate **4 to 24 seconds** after it started serving again. Nobody taps a phone within four seconds of association, so iOS is doing that on its own.
+**4. Start CarPlay in the car as usual.**
 
-It is not unconditional, so do not plan around it:
+**5. On the phone, tap it once:** Settings → Wi-Fi → the car's network → **Check For Internet Access** → turn on **Use For Internet**.
 
-- Two sessions the same morning sat `phone_unvalidated` with **0 bytes** forwarded, and stayed that way.
-- A genuine car restart still needs the tap. The 2026-11-11 capture has the car off for 54 minutes, and on the next start nothing reached the apps until it was tapped — the whole point of that instrumented drive.
-- The gaps where re-validation worked were short. A 29-minute absence is not the same thing as a cold start the next morning.
+**6. Open Maps on CarPlay.** Search and routing work with no cell signal.
 
-The box tells you which state you are in rather than leaving you to guess: it logs `phone_unvalidated` with the fix in the hint, and `validated` once the phone's probe traffic appears. The signal is live, not just forensic — `nft list counters` answers "did the tap land?" directly.
+For a permanent multi-car setup — one daemon per car, learned signal thresholds, clean handling of drive-offs — install `carplayd` instead of `carplay-box.sh`. See [docs/status.md](docs/status.md).
 
-Whether a beacon could remove the tap entirely is an open question with a staged plan and a cheap first test in [docs/ap-signalling.md](docs/ap-signalling.md). Nothing in it is measured, and the two cars that work today advertise no internet capability at all.
+## About that tap
 
-## Quick start
+It is the one thing that catches everyone out, so it is worth being blunt about.
 
-1. **Get the CarPlay Wi-Fi password.** iOS 27: Settings → Wi-Fi → Edit → Known Networks → the car's network → Password. Face ID, then Copy. No jailbreak.
+iOS gives a CarPlay network the lowest possible priority. It gets a limited route that background services use and **your apps ignore**. The box can be working perfectly and Maps will still fail. That is exactly what happened on one instrumented drive: 1.36 MB moved through the box and not one user-facing app touched it.
 
-2. **Get a Linux box** with wired Ethernet to your internet and a 2.4 GHz Wi-Fi adapter that can be a station. A Raspberry Pi, Orange Pi or similar. One USB radio per car if you want more than one car served at once — they cannot share.
+So you tap *Check For Internet Access*, then *Use For Internet*, and it works.
 
-3. **Put the car's details in `secrets/carplay.env`** (copy `secrets.example.env`):
+**After that first tap, iOS mostly re-checks by itself.** Across sessions where the car was gone for 15–29 minutes, the phone came back on its own 4–24 seconds after the box started serving. Nobody taps that fast.
 
-   ```
-   CAR_SSID='BMW12345 CarPlay'
-   CAR_PSK='your-password-here'
-   ```
+**But not always.** Two sessions in one morning never validated and moved zero bytes, and after a real car restart — engine off for 54 minutes — it needed the tap again. Treat the tap as required and the automatic re-check as a bonus.
 
-4. **Install:**
+The box tells you which state you are in rather than leaving you guessing. It logs `phone_unvalidated` with the fix in the message, and `validated` once the phone's traffic appears. `nft list counters` answers "did the tap land?" directly.
 
-   ```sh
-   sudo scripts/carplay-box.sh install
-   ```
+## Does it work?
 
-   The box now joins that car whenever it appears and shares the wired connection automatically. For a one-shot test instead, use `scripts/poc-linux.sh up`.
+Yes, on a real car, measured — most recently **44,327 packets / 6.2 MB** forwarded to a phone in a single day.
 
-5. **In the car,** start CarPlay as usual, then on the phone: Settings → Wi-Fi → the car's network → **Check For Internet Access** → **Use For Internet**.
+The honest caveat: **one car at a time is proven, both cars at once is not.** There are two cars here, an F22 and an F32. The F22 is the one currently working. The F32 was proven back in November 2026 on an older single-radio setup and has not been in the garage since the per-car radios went in, so it has never run on the current build. Nothing suggests a fault — its radio is healthy and hunting, the car is just elsewhere.
 
-6. **Open Maps on CarPlay.** Search and routing work with no cell signal.
+Also built but never actually used by a phone: **NAT64**, for reaching IPv4-only machines on your home network. It is deployed and the translator is up, but its tunnel has carried three packets, all outbound.
 
-For the real deployment — one daemon per car, learned thresholds, departure handling — install `carplayd` instead; see [docs/status.md](docs/status.md) and `carplayd/`.
+Full status, per car, with dates: **[docs/status.md](docs/status.md)**. Every test ever run: **[docs/test-log.md](docs/test-log.md)**.
+
+---
+
+# Technical detail
 
 ## How it works
 
@@ -100,18 +99,31 @@ flowchart LR
   L --> W((Internet))
 ```
 
-The car hands out IPv4 with no router and no DNS, and sends no router advertisements of its own. So the box does not fight it: it leaves IPv4 alone and becomes the only IPv6 router on the link, advertising a ULA prefix, itself as the route, and a DNS server, then NATs out to the house. The phone picks that up with plain SLAAC — nothing is configured on the phone beyond the one switch.
+The car hands out IPv4 with no router and no DNS, and sends no router advertisements of its own. So the box doesn't fight it: it leaves IPv4 alone and becomes the only IPv6 router on the link, advertising a ULA prefix, itself as the route, and a DNS server, then NATs out to the house. The phone picks that up with plain SLAAC. Nothing is configured on the phone beyond the one switch.
 
 ## What the box does
 
 - **Serves whichever configured car turns up**, one daemon per radio, with an nftables table per car link that permits the internet and nothing else: not the box, not the home LAN, not the other car.
-- **Leaves before the link dies, and says goodbye.** Departures here do not fade politely — the signal stays flat and then the link drops. So it leaves on the driver's `tx_failed` rate climbing, which buys about 8 seconds of warning where RSSI gives none. On a real drive: 3 leaves, 3 goodbye RAs, no stranded routes.
-- **Learns its own thresholds.** Fixed dBm cannot work here: the box is behind a cinderblock wall where "parked" and "dying" overlap, and every number moves when a car parks differently or a radio is swapped. Each car's healthy band is learned at runtime, persisted, and re-learned when the world changes.
+- **Leaves before the link dies, and says goodbye.** Departures here don't fade politely — the signal stays flat and then the link drops. So it leaves on the driver's `tx_failed` rate climbing, which buys about 8 seconds of warning where RSSI gives none. On a real drive: 3 leaves, 3 goodbye RAs, no stranded routes.
+- **Learns its own thresholds.** Fixed dBm can't work here: the box sits behind a cinderblock wall where "parked" and "dying" overlap, and every number moves when a car parks differently or a radio is swapped. Each car's healthy band is learned at runtime, persisted, and re-learned when the world changes.
 - **Recovers a deaf radio.** The AR9271 sometimes stops receiving while reporting itself healthy. A run of empty scans on a channel that always has neighbours means the radio, not the world, and it gets rebuilt without disturbing the other car.
-- **Reaches IPv4-only hosts** through DNS64 + NAT64, allowlisted to named hosts, because a car link that is IPv6-only cannot otherwise reach half a homelab. Deployed, not yet exercised by a phone.
+- **Reaches IPv4-only hosts** through DNS64 + NAT64, allowlisted to named hosts. Deployed, not yet exercised by a phone.
 - **Records both sides of a drive.** `carrecon` runs in the car in monitor mode, so a departure can be reconstructed from the air rather than only from the box's point of view.
 
-See [docs/findings.md](docs/findings.md) for what the measurements actually showed — including a leading hypothesis the data killed.
+See [docs/findings.md](docs/findings.md) for what the measurements showed — including a leading hypothesis the data killed.
+
+## Where this stands, per car
+
+Measured on the box and the phone, not inferred.
+
+| | F22 M240i (`car B`) | F32 (`car A`) |
+|---|---|---|
+| **Box joins the car's CarPlay Wi-Fi** | ✅ repeatedly, 2026-11-14, on its own USB radio | ✅ 2026-11-02/03, on the old shared radio |
+| **Phone gets a route and real app traffic** | ✅ **44,327 packets / 6.2 MB forwarded**, 5 × `validated` | ✅ 2026-11-02, Maps search + routing on CarPlay |
+| **On the current two-radio build** | ✅ this is the build in service | ⬜ **never served** — not in RF range during any logged window |
+| **Clean departures (goodbye before the link dies)** | ✅ 3/3 on a real drive | ⚠️ an early departure stranded a route; fixed, re-tested on the F22 only |
+
+> **Resolve cars by SSID, never by letter.** `carplayd.conf`'s `[car A]` is the F32 and `[car B]` is the F22. `secrets/carplay.env` uses the opposite convention.
 
 ## Key facts
 
@@ -155,7 +167,7 @@ Full roadmap, acceptance criteria and open items: **[docs/status.md](docs/status
 | [docs/two-cars.md](docs/two-cars.md) | Two cars: scenarios, per-car prefixes, arbitration, simulator |
 | [docs/usb-radios.md](docs/usb-radios.md) | One radio per car: two AR9271 dongles, stable naming, the traps |
 | [docs/kernel-modules.md](docs/kernel-modules.md) | Building modules the vendor kernel left out (TUN, ath9k) |
-| [docs/ipv4-options.md](docs/ipv4-options.md) | Reaching IPv4-only hosts: DNS64 + NAT64, and why a plain DNS relay cannot work |
+| [docs/ipv4-options.md](docs/ipv4-options.md) | Reaching IPv4-only hosts: DNS64 + NAT64, and why a plain DNS relay can't work |
 | [docs/ap-signalling.md](docs/ap-signalling.md) | Could a beacon remove the *Use For Internet* tap? Staged, gated, unmeasured |
 | [docs/ipv6-route.md](docs/ipv6-route.md) | The IPv6 design and the permanent-box recipe |
 | [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | Lab telemetry + fast connect/leave/reconnect (EnGenius OpenWrt) |
@@ -179,4 +191,4 @@ Full roadmap, acceptance criteria and open items: **[docs/status.md](docs/status
 - **Scanning your own refs is not enough.** This repo published unscrubbed history twice: once in the tree, and once because a rewrite force-pushed `main` but left two release tags pointing into the old history. Check what the *remote* serves.
 - **Car work is read-only** unless a step says otherwise. No coding, no flashing.
 - **Log every test** in [docs/test-log.md](docs/test-log.md): date, what ran, what happened, what changed as a result. A claim with no row is not a result.
-- **Label every claim** measured / source / emulator / inferred. The emulator is a Linux stand-in, not an iPhone; it cannot tell you anything about iOS policy.
+- **Label every claim** measured / source / emulator / inferred. The emulator is a Linux stand-in, not an iPhone; it can't tell you anything about iOS policy.
