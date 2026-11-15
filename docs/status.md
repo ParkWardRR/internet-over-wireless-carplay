@@ -69,7 +69,7 @@ Claims are labelled: **measured** (on the car, phone or box), **source** (code o
 
 - **Research agents fabricated quotes three times.** Everything in the docs was re-checked against a fetched source or the device.
 - **The emulator found five carplayd bugs** before they reached a car. An outside review then found a sixth class of problem (standards compliance) that no scenario asserted. Scenarios now check the wire format too (ra-audit).
-- **Secrets leaked once:** test PSKs and SSID digits sat in tracked files until the review. A pre-commit hook now blocks them — and earned its keep again on 2026-11-13, catching a real car SSID used as a test fixture in `recon/ieaudit`. The history was rewritten the same day, which removes them from future clones but cannot un-publish what was public for nine days.
+- **Secrets leaked once:** test PSKs and SSID digits sat in tracked files until the review. A pre-commit hook now blocks them — and earned its keep again on 2026-11-13, catching a real car SSID used as a test fixture in `recon/ieaudit`. The history was rewritten the same day, which removes them from future clones but cannot un-publish what was public for ten days. **A rewrite is not done when `git grep` across your own refs comes back clean:** only `main` had been force-pushed, so GitHub kept serving the unscrubbed history under two release tags for another day. Check the remote's refs, not the local ones.
 
 ## What we tested
 
@@ -152,7 +152,7 @@ flowchart LR
 | 10 | **Phone moving between cars**, second driver's phone | real use | you |
 | 11 | **CarNet Probe**: signing + Access Wi-Fi Information entitlement for SSID/BSSID/security. RSSI isn't available through a supported API | developer.apple.com | you |
 | 12 | Ops: crash tests that need hardware (power loss, radio removal, firmware stall) | — | me |
-| 13 | ✅ **Git history rewritten** (2026-11-13): both cars' PSKs and both SSID digit groups are gone from all 88 commits on every ref. **Residual, accepted:** the repo was public 2026-11-04 → 2026-11-13, so the PSKs are disclosed regardless of the rewrite; re-pairing each car regenerates them, and until that happens the leaked ones still open the car networks to anyone in RF range | — | closed |
+| 13 | ⚠️ **Git history rewritten** (2026-11-13): both cars' PSKs and both SSID digit groups are gone from all 88 commits on every **local** ref. **The rewrite did not reach GitHub's tags** — only `main` was force-pushed, so `refs/tags/v0.1.0` and `v0.2.0` on the remote still pointed into the unscrubbed history and anyone could clone it (found 2026-11-14; a pre-scrub blob read back through the public API with both real SSID digit groups and no placeholders). Fix in flight: delete and recreate the repository under the same name, which also drops the objects a tag force-push would leave reachable by raw SHA. **Residual, accepted:** the repo was public 2026-11-04 → 2026-11-14, so the PSKs are disclosed regardless; re-pairing each car regenerates them, and until that happens the leaked ones still open the car networks to anyone in RF range | — | in progress |
 | 14 | Fallbacks parked: USB-C Ethernet on the phone, offline maps, booster | — | parked |
 | 15 | **AP signalling**: could a beacon remove the *Use For Internet* tap? Staged and gated, nothing measured ([ap-signalling.md](ap-signalling.md)). Gate 0 is one sysdiagnose and could close the whole question before any hardware | an iPhone sysdiagnose while parked | you capture; I read it |
 
