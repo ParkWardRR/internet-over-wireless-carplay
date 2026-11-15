@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="1200" height="380" role="img" aria-labelledby="t d">
+  <title id="t">You have to tap it once</title>
+  <desc id="d">Settings, then Wi-Fi, then the car's network, then Check For Internet Access, then turn on Use For Internet.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A1020"/>
+      <stop offset="0.55" stop-color="#131E32"/>
+      <stop offset="1" stop-color="#0C1424"/>
+    </linearGradient>
+
+    <radialGradient id="glowBlue" gradientUnits="userSpaceOnUse" cx="150" cy="40" r="620">
+      <stop offset="0" stop-color="#1C69D4" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#1C69D4" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="glowGreen" gradientUnits="userSpaceOnUse" cx="1024" cy="238" r="260">
+      <stop offset="0" stop-color="#30D158" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#30D158" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4C9BFF"/>
+      <stop offset="1" stop-color="#30D158"/>
+    </linearGradient>
+
+    <linearGradient id="cardTop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.1" fill="#7EA0D8" opacity="0.10"/>
+    </pattern>
+
+  </defs>
+
+  <!-- canvas -->
+  <rect x="0.75" y="0.75" width="1198.5" height="378.5" rx="20" fill="url(#bg)"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="378.5" rx="20" fill="url(#dots)"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="378.5" rx="20" fill="url(#glowBlue)"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="378.5" rx="20" fill="url(#glowGreen)"/>
+
+  <!-- header -->
+  <text x="58" y="72" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="11.5" font-weight="600" letter-spacing="2.6" fill="#64789C">WIRELESS CARPLAY · NO CELL SIGNAL</text>
+
+  <text x="58" y="118" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="37" font-weight="700" letter-spacing="-0.6" fill="#EEF4FF">You have to tap it once.</text>
+
+  <rect x="58" y="139" width="66" height="3" rx="1.5" fill="url(#rule)"/>
+
+  <!-- flow spine -->
+  <line x1="208" y1="240" x2="906" y2="240" stroke="#2B3B59" stroke-width="1.5" opacity="0.55"/>
+
+  <!-- step 1: Settings -->
+  <g>
+    <rect x="58" y="186" width="150" height="108" rx="16" fill="#16213A" stroke="#2A3A58" stroke-width="1.25"/>
+    <rect x="58.6" y="186.6" width="148.8" height="54" rx="15.4" fill="url(#cardTop)"/>
+    <g stroke="#8FB6F5" fill="none">
+      <circle cx="133" cy="218" r="7.6" stroke-width="2.6"/>
+      <circle cx="133" cy="218" r="3.0" stroke-width="2.1"/>
+      <path stroke-width="3.6" stroke-linecap="butt"
+            d="M140.6 218 L145.4 218 M138.37 223.37 L141.77 226.77 M133 225.6 L133 230.4 M127.63 223.37 L124.23 226.77 M125.4 218 L120.6 218 M127.63 212.63 L124.23 209.23 M133 210.4 L133 205.6 M138.37 212.63 L141.77 209.23"/>
+    </g>
+    <text x="133" y="266" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+          font-size="14" font-weight="600" fill="#DCE6F7">Settings</text>
+  </g>
+
+  <path d="M219 232 L229 240 L219 248" fill="none" stroke="#4A5F86" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- step 2: Wi-Fi -->
+  <g>
+    <rect x="240" y="186" width="130" height="108" rx="16" fill="#16213A" stroke="#2A3A58" stroke-width="1.25"/>
+    <rect x="240.6" y="186.6" width="128.8" height="54" rx="15.4" fill="url(#cardTop)"/>
+    <g stroke="#8FB6F5" stroke-width="2.4" fill="none" stroke-linecap="round">
+      <path d="M288 212.5 A 24 24 0 0 1 322 212.5"/>
+      <path d="M294 220 A 16 16 0 0 1 316 220"/>
+      <path d="M300 227 A 8 8 0 0 1 310 227"/>
+    </g>
+    <circle cx="305" cy="231.5" r="2.6" fill="#8FB6F5"/>
+    <text x="305" y="266" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+          font-size="14" font-weight="600" fill="#DCE6F7">Wi-Fi</text>
+  </g>
+
+  <path d="M381 232 L391 240 L381 248" fill="none" stroke="#4A5F86" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- step 3: the car's network -->
+  <g>
+    <rect x="402" y="186" width="190" height="108" rx="16" fill="#16213A" stroke="#2A3A58" stroke-width="1.25"/>
+    <rect x="402.6" y="186.6" width="188.8" height="54" rx="15.4" fill="url(#cardTop)"/>
+    <g fill="none" stroke="#8FB6F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M481 224 L484.5 213.5 Q485.4 211 488 211 L506 211 Q508.6 211 509.5 213.5 L513 224"/>
+      <path d="M479 224 L515 224 Q517 224 517 226 L517 231 Q517 233 515 233 L479 233 Q477 233 477 231 L477 226 Q477 224 479 224 Z"/>
+      <path d="M484 233 L484 236 M510 233 L510 236"/>
+    </g>
+    <text x="497" y="266" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+          font-size="14" font-weight="600" fill="#DCE6F7">the car's network</text>
+  </g>
+
+  <path d="M603 232 L613 240 L603 248" fill="none" stroke="#4A5F86" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- step 4: Check For Internet Access -->
+  <g>
+    <rect x="624" y="186" width="250" height="108" rx="16" fill="#16213A" stroke="#32507F" stroke-width="1.4"/>
+    <rect x="624.6" y="186.6" width="248.8" height="54" rx="15.4" fill="url(#cardTop)"/>
+    <g fill="none" stroke="#8FB6F5" stroke-width="2.1" stroke-linecap="round">
+      <circle cx="749" cy="219" r="13"/>
+      <ellipse cx="749" cy="219" rx="5.6" ry="13"/>
+      <path d="M736.4 215 L761.6 215 M736.4 223 L761.6 223"/>
+    </g>
+    <text x="749" y="266" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+          font-size="14" font-weight="600" fill="#EAF1FE">Check For Internet Access</text>
+  </g>
+
+  <path d="M885 232 L895 240 L885 248" fill="none" stroke="#4A5F86" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- step 5: Use For Internet (the payoff) -->
+  <g>
+    <rect x="906" y="186" width="236" height="108" rx="16" fill="#152A2A" stroke="#2F7A4C" stroke-width="1.6"/>
+    <rect x="906.6" y="186.6" width="234.8" height="54" rx="15.4" fill="url(#cardTop)"/>
+    <rect x="998" y="204" width="52" height="30" rx="15" fill="#30D158"/>
+    <circle cx="1035" cy="219" r="12.4" fill="#FFFFFF"/>
+    <text x="1024" y="266" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+          font-size="14" font-weight="700" fill="#D8F7E4">Use For Internet</text>
+  </g>
+
+  <!-- caption -->
+  <text x="58" y="340" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="13.5" fill="#8B9DBC">Then Maps works underground. iOS mostly re-validates by itself after that first tap — but a car restart needs it again.</text>
+
+  <rect x="0.75" y="0.75" width="1198.5" height="378.5" rx="20" fill="none" stroke="#273753" stroke-width="1.5"/>
+</svg>

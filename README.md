@@ -1,3 +1,12 @@
+<p align="center">
+  <img src="docs/img/tap-once.svg" width="900"
+       alt="You have to tap it once: Settings → Wi-Fi → the car's network → Check For Internet Access, then turn on Use For Internet.">
+</p>
+
+<p align="center">
+  <b>You have to tap it once:</b> Settings → Wi-Fi → the car's network → <b>Check For Internet Access</b>, then turn on <b>Use For Internet</b>.
+</p>
+
 # internet-over-wireless-carplay
 
 [![Release](https://img.shields.io/github/v/release/ParkWardRR/internet-over-wireless-carplay?label=release&color=blue)](https://github.com/ParkWardRR/internet-over-wireless-carplay/releases)
@@ -39,7 +48,7 @@ Also still unproven, despite being built and deployed: **a real phone using NAT6
 
 iOS gives a CarPlay network the service rank `Never`. It gets a scoped route and nothing more, which is enough for background daemons and useless for your apps. The box can be flawless and Maps will still fail.
 
-**You have to tap it once:** Settings → Wi-Fi → the car's network → **Check For Internet Access**, then turn on **Use For Internet**.
+That is what the tap at the top of this page is for, and it is the whole reason the box is not enough on its own.
 
 **After that first tap, iOS mostly re-validates by itself** — this is new as of 2026-11-14 and is the main thing that changed since the earlier write-ups. Across separate serving sessions on the F22, separated by 15–29 minutes of the car being gone, the box saw the phone re-validate **4 to 24 seconds** after it started serving again. Nobody taps a phone within four seconds of association, so iOS is doing that on its own.
 
