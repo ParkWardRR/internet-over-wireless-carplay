@@ -1,23 +1,26 @@
 # Status: what we learned, tested, built, plan, open items
 
-*As of 2026-11-13 (At a glance); the detail sections below still carry their 2026-11-03 dates and were revised after an external review ([review-response.md](review-response.md)).* Goal: Google Maps, and as much else as possible, on wireless CarPlay in the underground garage where there's no cellular. Two cars: the **F32** and the **F22 M240i** (SSIDs `BMW##### CarPlay`; the digits are VIN digits and stay in `secrets/`).
+*At a glance is as of **2026-11-14**, from the live box; the detail sections below still carry their 2026-11-03 dates and were revised after an external review ([review-response.md](review-response.md)).* Goal: Google Maps, and as much else as possible, on wireless CarPlay in the underground garage where there's no cellular. Two cars: the **F32** and the **F22 M240i** (SSIDs `BMW##### CarPlay`; the digits are VIN digits and stay in `secrets/`).
 
 Claims are labelled: **measured** (on the car, phone or box), **source** (code or docs we read), **emulator** (hwsim, Linux stand-in hosts), **inferred**.
+
+> **Resolve cars by SSID, never by letter.** `carplayd.conf`'s `[car A]` is the **F32** and `[car B]` is the **F22**; `secrets/carplay.env` uses the opposite convention. Every letter below is the config's.
 
 ## At a glance
 
 | | |
 |---|---|
-| **Proven** | On the tested **F32**, an iPhone (iOS 27.0.1) on the wireless CarPlay network used an added IPv6 internet gateway: *Check For Internet Access → Use For Internet*, then Google Maps search and routing. The phone's IPv4 settings were unchanged (2026-11-02, P2, measured) |
-| **Answered since** | **iOS does not remember *Use For Internet*** — it must be re-tapped after every car restart, and until it is, apps get nothing while every box-side metric reads healthy (2026-11-11 capture, confirmed live 2026-11-12 by watching `probe_A` go 0 → 15 the moment it was tapped) |
-| **Not yet proven** | Unattended repeatability with carplayd on a real car · cellular handoff timing on the real iPhone · F22 equivalence · EWS377 firmware reliability · two-box failover · **association on the two new USB radios**, and **a phone actually using NAT64** — both were built and verified from the box while the cars were away |
-| **Fixed since** | IPv4-only hosts on the home LAN are reachable from a car link: DNS64 + NAT64 on the box, allowlisted to three hosts ([ipv4-options.md](ipv4-options.md)). This is the app-wide compatibility gap that used to sit under *Not yet proven* |
-| **Running now** | **carplayd** on **garage-sbc** (an Orange Pi 4A, Allwinner T527, in the basement), serving **one radio per car**: two USB AR9271 dongles, `car-a` and `car-b`, so both cars can be served at once rather than time-shared ([usb-radios.md](usb-radios.md)). Driver and TUN had to be cross-built — the vendor kernel ships neither ([kernel-modules.md](kernel-modules.md)). Events to `/var/lib/carplayd/events.log`, rotated daily, 14 days kept |
-| **Next** | **One drive with a car present**, which settles the three things standing open at once: association on the two new USB radios, a phone actually using NAT64 to reach `nas`/`media`/`dns`, and whether both cars can be served at the same time |
+| **Proven, F22** (`car B`) | **The whole path works, on the current two-radio build** (2026-11-14, measured): repeated associations on the `car-b` AR9271 at WPA2-PSK / ch 11, five `validated` events, and **44,327 packets / 6.2 MB forwarded** to the phone in one day. This closes *association on the new USB radios* and most of *F22 equivalence* |
+| **Proven, F32** (`car A`) | An iPhone (iOS 27.0.1) on the CarPlay network used an added IPv6 gateway: *Check For Internet Access → Use For Internet*, then Google Maps search and routing, IPv4 settings unchanged (2026-11-02, P2, measured). **That proof is on the old single-radio radvd setup.** On the two-radio build the F32 has never been served at all |
+| **Changed since** | **iOS mostly re-validates on its own after the first tap** (2026-11-14, measured). Across F22 sessions split by 15–29 min absences, `validated` returned **4–24 s** after serving resumed — too fast to be a human tap. **But not always**: two sessions the same morning stayed `phone_unvalidated` with **0 bytes** forwarded, and a real car restart still needs the tap (2026-11-11, car off 54 min). Treat the tap as required and the re-validation as a bonus |
+| **Not yet proven** | **Both cars served at the same time** — they have not been in the garage together since the per-car radios went in · **the F32 on the two-radio build** · **a phone actually using NAT64**: the translator is up and five names resolve, but its tun has carried **3 packets, all outbound** · cellular handoff timing on the real iPhone · EWS377 firmware reliability · two-box failover |
+| **Not a fault** | The F32's absence is the car, not the box: `cara` scans 23 neighbours (same as `carb`), its `wpa_supplicant` is hunting, and `carplayd_detect_seconds{car="A"}` is 0 because the SSID has never entered a scan |
+| **Running now** | **carplayd** on **garage-sbc** (an Orange Pi 4A, Allwinner T527, in the basement), **one radio per car**: two USB AR9271 dongles, `car-a` and `car-b`, so both cars *can* be served at once rather than time-shared ([usb-radios.md](usb-radios.md)). Driver and TUN had to be cross-built — the vendor kernel ships neither ([kernel-modules.md](kernel-modules.md)). Up since 06:17 on 2026-11-14, 0 restarts. Events to `/var/lib/carplayd/events.log`, rotated daily, 14 days kept |
+| **Next** | **One drive with both cars in the garage**, which settles all three open things at once: the F32 on this build, two cars served simultaneously, and a phone using NAT64 |
 
 ## What we learned
 
-### The car (NBT EVO; measured on the F32 only)
+### The car (NBT EVO; the beacon/DHCP detail below is from the F32, the 2026-11-14 path result is the F22)
 
 | Observation | Consequence |
 |---|---|
@@ -28,12 +31,13 @@ Claims are labelled: **measured** (on the car, phone or box), **source** (code o
 | Head unit sent **no IPv6 RAs**; no head-unit SLAAC address seen in the P2 capture | Our RA was the only router. carplayd counts devices per prefix, so a change would show up |
 | **A second client was allowed**, no client isolation | The box can join next to the phone. Phone ↔ box traffic is **relayed by the head unit**, so the box's car RSSI isn't the phone's path quality |
 | Password: 10 random characters, **visible on iOS 27 without a jailbreak** (Settings → Wi-Fi → Edit → Known Networks → the car → Password) | Stored in `secrets/carplay.env` |
-| F22 (measured by carplayd, 2026-11-03): **channel 11**, same ciphers; a phone joined and solicited. Beacon, DHCP and iOS behaviour not yet checked | Both cars share channel 11. One ULA /64 per car; no IPv4 on car links |
+| F22: **channel 11**, same ciphers (carplayd, 2026-11-03), and on **2026-11-14 the full path** — phone validated, 6.2 MB forwarded. Its beacon and DHCP still haven't been decoded separately from the F32's | Both cars share channel 11. One ULA /64 per car; no IPv4 on car links |
 | Real departure/return with carplayd (F32, 2026-11-03): parked −68…−82 dBm from garage-sbc, edge of range −86…−91; link lost at −89 | Leave −92 is too loose (no goodbye was sent); ≈ −85 would have been |
 
 ### The iPhone (iOS 27.0.1; measured unless noted)
 
 - **Check For Internet Access** is a button that makes iOS probe the network. If the probe passes, a **Use For Internet** switch appears. With it on, the phone uses the car Wi-Fi for internet and, per Apple's on-screen text, falls back to cellular when that fails. It also exists on non-factory CarPlay receivers (DiPlay #393). "Introduced in iOS 27 beta 3" comes from one betaprofiles forum post and isn't independently confirmed.
+- **iOS re-probes on its own after the first tap** (measured 2026-11-14, F22). Across serving sessions separated by 15–29 minutes of the car being absent, probe traffic reappeared **4–24 s** after the box resumed serving — no tap. The mechanism is not traced; all we observe is the probe. It is **not** reliable: two sessions the same morning produced no probe and forwarded 0 bytes, and a 54-minute car restart (2026-11-11) needed the tap.
 - iOS accepted an **IPv6 route with a ULA prefix**: SLAAC, RDNSS, internet check. 134 of 135 frames were IPv6; HTTPS, QUIC and the phone's Tailscale all went through the box.
 - **Why a CarPlay network normally carries no internet** (hypothesis, source: Apple's open-source configd/xnu): a `PrimaryRank = Never` service gets only a scoped default route, and *Use For Internet* lifts that. Not traced on the device.
 - In the P2 capture the phone sent Router Solicitations at link-up. carplayd doesn't rely on later ones: periodic RAs every 3–4 s, plus an answer to a new device's MLD report.
@@ -78,7 +82,10 @@ Claims are labelled: **measured** (on the car, phone or box), **source** (code o
 | F32 + garage-sbc (P1) | Beacon decode, scan | 2.4 GHz ch 11, TKIP group, Interworking Internet = 0 |
 | F32 + garage-sbc (P2) | ULA /64 RA + RDNSS + NAT66 (radvd), iPhone iOS 27 | ✅ Use For Internet, Maps works; 81 NAT66 flows, 11.5 MB; goodbye RA (router lifetime 0) seen on air. carplayd wasn't used |
 | CarNet Probe on the iPhone | Path state, Wi-Fi-bound vs default probes, AAAA | Works at home; bound probe 38 ms |
-| garage-sbc | carplayd deployed, hunting both cars; uplink route with forwarding on | Running; no real car yet |
+| garage-sbc | carplayd deployed, hunting both cars; uplink route with forwarding on | Running; up since 2026-11-14 06:17, 0 restarts |
+| **F22 + garage-sbc, own radio (2026-11-14)** | Real parked sessions over a day: association, validation, forwarded traffic | ✅ **the current headline.** Repeated joins on `car-b` (WPA2-PSK, ch 11), 5 × `validated`, **44,327 packets / 6.2 MB** forwarded. Also: `validated` recurred 4–24 s after serving resumed across 15–29 min absences, with no tap |
+| **F32 + garage-sbc, own radio** | Same | ⬜ **never ran** — the car has not been in RF range during any logged window. `cara` itself is healthy (23 neighbours) |
+| NAT64/DNS64 on the box (2026-11-13→14) | Five homelab names from a car link | ◐ names resolve and the translator is up, but the `nat64` tun has carried **3 packets, all outbound** — no phone has used it |
 | Emulator (OpenWrt r38011, kernel 6.18), rounds 1–2 | 33 stock + 82 carplayd runs | Each run's assertions and timeouts passed ([results](emulator-results.md)) |
 | Emulator, round 3 (after the review) | RFC timing on the wire, upstream loss, isolation, full carplayd suite again | 17 scenarios × 3 runs: every run that booted passed its assertions (one soak VM failed to boot). One target missed: car B join 1.78 s in 1 of 3 two-cars runs (target 1.5 s) |
 
@@ -108,31 +115,38 @@ Not covered by the emulator: real RF, the head unit's AP, iOS policy (*Use For I
 | `scripts/` | `deploy-carplayd-sbc.sh` (+ `rollback`), `check-secrets.sh` (pre-commit), `poc-linux.sh` / `poc-mac-nat.sh` (P2), `openwrt-carplay.sh` (stock OpenWrt config), `car-ie.sh` (beacon decoder) |
 | `ios/CarNetProbe` | iPhone diagnostics app |
 
-## The plan (reordered after the review)
+## Roadmap
+
+Everything to the left of the gate below is measured and closed. The gate is one drive, and it is the only thing standing between "works on a car" and "works on this fleet".
 
 ```mermaid
 flowchart LR
-  A["✅ P2 on the F32<br/>(radvd)"] --> B["✅ carplayd +<br/>emulator, RFC audit"]
-  B --> C["F32 + carplayd:<br/>cellular off,<br/>then departure"]
-  C --> D["upstream break,<br/>VPN on/off,<br/>multi-day"]
-  D --> E["F22 survey<br/>+ real run"]
-  E --> F["NAT64/DNS64<br/>+ PREF64"]
-  F --> G["EWS377 soak"]
-  G --> H["two boxes:<br/>fixed ownership,<br/>failure injection"]
+  A["✅ P2 on the F32<br/>(radvd, single radio)"] --> B["✅ carplayd +<br/>emulator, RFC audit"]
+  B --> C["✅ Departures:<br/>leave on tx_failed,<br/>3/3 with goodbye"]
+  C --> D["✅ F22 end to end<br/>on its own radio<br/>(6.2 MB, 2026-11-14)"]
+  D --> G{{"GATE: both cars<br/>in the garage,<br/>one drive"}}
+  G --> E["F32 on this build<br/>+ both at once<br/>+ phone over NAT64"]
+  E --> F["Cellular handoff<br/>timing, VPN,<br/>multi-day soak"]
+  F --> H["EWS377 soak"]
+  H --> I["Two boxes:<br/>fixed ownership,<br/>failure injection"]
 ```
 
-| # | Test or change | Accepted when |
-|---|---|---|
-| 1 | ✅ RA scheduler, RDNSS lifetimes, withdrawal | Capture shows the intended behaviour on normal, withdrawal and goodbye paths (ra-audit) |
-| 2 | **F32 with cellular disabled**, carplayd on garage-sbc | A fresh, uncached search and route succeed through carplayd; negotiated cipher logged |
-| 3 | Break the upstream with the car Wi-Fi intact | The box withdraws; no black hole; iPhone back on cellular |
-| 4 | **Real departure with cellular on** | Time from leaving to the first successful new request over cellular (not just the goodbye) |
-| 5 | Tailscale/VPN off and on | Base path and overlay judged separately |
-| 6 | Reconnect over several days | Does *Use For Internet* persist per phone and per car? |
-| 7 | F22 survey and real run | Channel, security, client forwarding, iOS behaviour |
-| 8 | NAT64/DNS64 + PREF64 on the dual-stack link | Native IPv6, A-only names, IPv4 literals, representative apps, and local CarPlay all work |
-| 9 | EWS377 soak | Repeated starts, departure/return, firewall reload, overnight |
-| 10 | Two boxes, fixed ownership | Predictable ownership and bounded recovery through partitions and reboots |
+**The gate is cheap and settles three things at once.** Both cars parked, one phone, one drive out and back. It closes: the F32 on the two-radio build, two cars served simultaneously, and a phone actually using NAT64. Nothing downstream is worth doing first, because all of it assumes the gate passes.
+
+| # | Test or change | Accepted when | State |
+|---|---|---|---|
+| 1 | RA scheduler, RDNSS lifetimes, withdrawal | Capture shows the intended behaviour on the normal, withdrawal and goodbye paths (ra-audit) | ✅ |
+| 2 | Leave before the link dies | A real departure produces a goodbye RA before the link drops, and no stranded route | ✅ 3/3 on the F22, `fail_rate` rule |
+| 3 | **F22 end to end on its own radio** | Association, `validated`, and real app bytes forwarded | ✅ 2026-11-14, 6.2 MB |
+| **4** | **GATE: both cars in the garage, one drive** | Both associate on their own radios **at the same time**; each phone gets its own prefix and forwards app traffic; the F32 reaches parity with the F22; `nat64` tun RX stops being 0 | ⬜ **next, blocks 5–10** |
+| 5 | F32 with cellular disabled, carplayd | A fresh, uncached search and route succeed through carplayd; negotiated cipher logged | ⬜ after 4 |
+| 6 | Break the upstream with the car Wi-Fi intact | The box withdraws; no black hole; iPhone back on cellular | ⬜ (emulator-passed, not real) |
+| 7 | Real departure with cellular on | Time from leaving to the first successful **new** request over cellular, not just the goodbye | ⬜ |
+| 8 | *Use For Internet* persistence, properly characterised | How long an absence iOS will re-validate across, and whether it survives a cold start next morning — per car, per phone. **Partly answered 2026-11-14**: yes for 15–29 min, no after a 54 min restart | ◐ in progress |
+| 9 | Tailscale/VPN off and on | Base path and overlay judged separately | ⬜ |
+| 10 | NAT64/DNS64 + PREF64 under real use | Native IPv6, A-only names, IPv4 literals, representative apps and local CarPlay all work from a phone | ⬜ deployed, unexercised |
+| 11 | EWS377AP soak | Repeated starts, departure/return, firewall reload, overnight | ⬜ |
+| 12 | Two boxes, fixed ownership | Predictable ownership and bounded recovery through partitions and reboots | ⬜ |
 
 **Two boxes.** Production starts with **fixed ownership**: one box per car, the EWS377 in the garage and garage-sbc as standby. The standby advertises a car only after the owner has been silent for a bounded time, and stops when the owner returns, with hold-down so the boxes don't flap. If both advertise during a partition, the phone sees two routers with different prefixes. IPv6 allows that: it's degraded, not broken. New requests recover within the takeover time; open connections through the failed box don't survive (NAT state isn't shared).
 
@@ -140,27 +154,28 @@ flowchart LR
 
 | # | Item | Needs | Who |
 |---|---|---|---|
-| 1 | **F32 + carplayd, cellular off** (plan 2): join time, route, Maps, negotiated cipher | F32 in the garage | you start the car; I read the log |
-| 2 | **Real departure with cellular on** (plan 4): time to the first new request over cellular; also CarPlay audio while downloading, phone locked/unlocked, in pocket/mounted, doors closed | F32 | you drive; I time it |
-| 3 | **Forwarded-path probe**: health check through the NAT path, not only from the box | — | me |
-| 4 | Does iOS **remember Use For Internet** across car restarts and days? Per car, per phone | real use | you (observe), me (logs) |
-| 5 | **F22 P1** + real run: channel, security, then pin `channel` | F22 on | you + me |
-| 6 | **Signal and path survey** from garage-sbc's spot: car RSSI *and* phone RTT/loss through the head unit | each car on | you + me |
-| 7 | **IPv4-only services** on the dual-stack link: DNS64 + NAT64 + PREF64 (plan 8) | after 1–6 | me |
-| 8 | **EWS377AP v3**: flash, ath11k STA, `iw phy` limits, carplayd + nft on device, rollback, placement | the AP | you flash; I port + test |
-| 9 | **Two boxes, fixed ownership** (emulator first, then real) | EWS up | me |
-| 10 | **Phone moving between cars**, second driver's phone | real use | you |
-| 11 | **CarNet Probe**: signing + Access Wi-Fi Information entitlement for SSID/BSSID/security. RSSI isn't available through a supported API | developer.apple.com | you |
-| 12 | Ops: crash tests that need hardware (power loss, radio removal, firmware stall) | — | me |
-| 13 | ⚠️ **Git history rewritten** (2026-11-13): both cars' PSKs and both SSID digit groups are gone from all 88 commits on every **local** ref. **The rewrite did not reach GitHub's tags** — only `main` was force-pushed, so `refs/tags/v0.1.0` and `v0.2.0` on the remote still pointed into the unscrubbed history and anyone could clone it (found 2026-11-14; a pre-scrub blob read back through the public API with both real SSID digit groups and no placeholders). Fix in flight: delete and recreate the repository under the same name, which also drops the objects a tag force-push would leave reachable by raw SHA. **Residual, accepted:** the repo was public 2026-11-04 → 2026-11-14, so the PSKs are disclosed regardless; re-pairing each car regenerates them, and until that happens the leaked ones still open the car networks to anyone in RF range | — | in progress |
-| 14 | Fallbacks parked: USB-C Ethernet on the phone, offline maps, booster | — | parked |
-| 15 | **AP signalling**: could a beacon remove the *Use For Internet* tap? Staged and gated, nothing measured ([ap-signalling.md](ap-signalling.md)). Gate 0 is one sysdiagnose and could close the whole question before any hardware | an iPhone sysdiagnose while parked | you capture; I read it |
+| 1 | ⬜ **THE GATE — both cars in the garage, one drive** (roadmap 4). Settles the F32 on this build, both cars at once, and a phone over NAT64. Everything else waits on it | both cars parked, one phone | you park and drive; I read the logs |
+| 2 | ⬜ **F32 on the two-radio build** (roadmap 5): join time, route, Maps, negotiated cipher, cellular off. The car has not been in RF range during any logged window; nothing suggests a fault | F32 in the garage | you start the car; I read the log |
+| 3 | ⬜ **A phone over NAT64** (roadmap 10). Deployed 2026-11-13, five names resolve, and the `nat64` tun has carried **3 packets, all outbound**. Until a phone uses it this is untested code in the path | a phone on a car link reaching `nas`/`media`/`dns` | you open the names; I watch the tun |
+| 4 | ◐ **Characterise *Use For Internet* persistence** (roadmap 8). Known: re-validates by itself across 15–29 min absences (2026-11-14), does **not** survive a 54 min car restart (2026-11-11). Unknown: where the boundary is, whether it holds overnight, and whether it differs per car or per phone | real use over several days | you observe; I correlate against `validated` |
+| 5 | ⬜ **Forwarded-path probe**: health check *through* the NAT path, not only from the box. A broken NAT path behind a healthy box check is still undetectable | — | me |
+| 6 | ⬜ **Signal and path survey** from garage-sbc's spot: car RSSI *and* the phone's RTT/loss through the head unit, which is the number that actually matters and the one we never measure | each car parked | you + me |
+| 7 | ⬜ **Link churn on the F22 is unexplained.** 2026-11-14 shows repeated `link_lost reason=4 why=inactivity locally_generated=1` at strong signal (−57 to −66 dBm), each followed by an immediate clean rejoin. Harmless so far — it re-validated every time — but a locally generated inactivity disconnect at −57 dBm is the box giving up, not the car | the events log; a capture | me |
+| 8 | ⬜ **EWS377AP v3**: flash, ath11k STA, `iw phy` limits, carplayd + nft on device, rollback, placement | the AP | you flash; I port + test |
+| 9 | ⬜ **Two boxes, fixed ownership** (emulator first, then real) | EWS up | me |
+| 10 | ⬜ **Phone moving between cars**, and a second driver's phone | real use | you |
+| 11 | ⬜ **CarNet Probe**: signing + Access Wi-Fi Information entitlement for SSID/BSSID/security. RSSI is not available through any supported API | developer.apple.com | you |
+| 12 | ⬜ Ops: crash tests that need hardware (power loss, radio removal, firmware stall) | — | me |
+| 13 | ✅ **Secrets in git history — closed 2026-11-14.** The 2026-11-13 rewrite cleaned every *local* ref but force-pushed only `main`, so GitHub kept serving the unscrubbed history under `refs/tags/v0.1.0` and `v0.2.0`; a pre-scrub blob read back through the public API with both real SSID digit groups and no placeholders. The repository was **deleted and recreated under the same name**, which also drops the objects a tag force-push would have left reachable by raw SHA; the pre-rewrite commits now 404 and a fresh clone carries only placeholders. **Residual, accepted and NOT closed by any of this:** the repo was public 2026-11-04 → 2026-11-14, so **both cars' PSKs are disclosed**. Re-pairing each car regenerates them; until then the leaked ones open both car networks to anyone in RF range | **re-pair both cars** | you |
+| 14 | ⏸ Fallbacks parked: USB-C Ethernet on the phone, offline maps, booster | — | parked |
+| 15 | ⬜ **AP signalling**: could a beacon remove the *Use For Internet* tap? Staged and gated, nothing measured ([ap-signalling.md](ap-signalling.md)). **Cheaper than it was**: the 2026-11-14 finding that iOS re-validates on its own across short absences removes much of the motivation, since the tap is now a once-per-session cost rather than once per return. Gate 0 is still one sysdiagnose | an iPhone sysdiagnose while parked | you capture; I read it |
 
 ## Risks
 
-- **iOS changes:** *Use For Internet* is new in iOS 27; a later iOS could change it. Manual IPv4 (ksweber's method) is the fallback.
-- **App compatibility:** Maps working proves Maps. IPv4-only services and apps with their own resolvers are untested (open item 7).
-- **RF and path:** the F22 parks farther from garage-sbc. The box's car RSSI doesn't measure the phone's path through the head unit.
+- **iOS changes:** *Use For Internet* is new in iOS 27, and the self-re-validation behaviour found on 2026-11-14 is undocumented by Apple — so it is exactly the kind of thing a point release can take away without notice. Manual IPv4 (ksweber's method) stays the fallback. Do not build anything that assumes the tap is unnecessary.
+- **App compatibility:** Maps working proves Maps. 6.2 MB of forwarded traffic on the F22 proves apps use the path, but not *which* apps survive it. IPv4-only services and apps with their own resolvers are still untested through a phone (open item 3).
+- **RF and path:** the F22 parked strong (−51 to −74 dBm from garage-sbc), so its 2026-11-14 result does not predict the F32's spot. The box's car RSSI still doesn't measure the phone's path through the head unit, which is the number that matters.
+- **Unexplained link churn:** repeated `link_lost reason=4 why=inactivity locally_generated=1` on the F22 at −57 to −66 dBm. Every one rejoined and re-validated, so it is currently cosmetic, but a locally generated inactivity disconnect on a strong link means the box is deciding to drop a healthy car (open item 7).
 - **ath11k STA quirks on IPQ807x** (reconnect stalls reported upstream): carplayd's watchdog helps; real soak needed.
 - **Car re-pairing changes the password:** carplayd hunts but never joins. Watch for repeated selects with no connect in the log.
 - **Upstream black hole:** mitigated (health gating, emulator-tested). A broken NAT path behind a healthy box check isn't detected yet (open item 3).
