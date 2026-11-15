@@ -29,6 +29,24 @@ var appleOUI = [3]byte{0x00, 0xa0, 0x40}
 
 const appleVendorType = 0x00
 
+// A second, unrelated Apple vendor element: the one an iPhone's Personal
+// Hotspot transmits, OUI 00:17:F2 type 6. It is decoded here only so a capture
+// cannot quietly confuse the two mechanisms — macOS surfaces it as `IOS_IE` and
+// uses it to recognise a hotspot, which is a different question from whether an
+// iPhone will promote a CarPlay network to its default internet path. Nothing in
+// the public reverse-engineering of this element concerns CarPlay.
+//
+// Two published examples of it disagree, so neither is treated as canonical:
+//
+//	00 17 f2 06 01 01 03 03 00 00   captured from a real Personal Hotspot
+//	00 17 f2 06 01 01 03 01 00 00   an OpenWrt vendor_elements example
+//
+// They differ in one octet and the field meanings are unresolved, which is
+// exactly why this decoder prints the payload rather than interpreting it.
+var appleHotspotOUI = [3]byte{0x00, 0x17, 0xf2}
+
+const appleHotspotVendorType = 0x06
+
 // appleFlagNames is indexed by bit number, counting bit 0 as the most
 // significant bit of flag octet 0. Unverified; see the provenance note above.
 var appleFlagNames = []string{

@@ -93,6 +93,33 @@ ieaudit_bin() {
 	echo "$STATE/ieaudit"
 }
 
+need_cmd() {
+	for c in "$@"; do
+		command -v "$c" >/dev/null || die "$c is not installed. On the SBC: apt-get install iw hostapd tcpdump (hostapd must be built with CONFIG_INTERWORKING=y, which 'run' verifies)"
+	done
+}
+
+# Refuse a FullMAC radio for the AP. On a SoftMAC (mac80211) driver hostapd
+# builds the whole beacon and the kernel transmits it verbatim, so a configured
+# Interworking element reaches the air. On a FullMAC driver the firmware builds
+# the beacon and the driver has to hand each extra element down explicitly — a
+# CarPlay AP developer lost days to exactly this, with hostapd happily accepting
+# interworking=1 while the element never went out (Ciellee, see
+# docs/ap-signalling.md). The capture would catch it either way; this check
+# saves the trip. On the SBC: car-a/car-b are ath9k_htc (SoftMAC, fine), wlan0
+# is the onboard Broadcom bcmsdh_sdmmc (FullMAC, exactly the trap).
+check_softmac() {
+	iface=$1
+	drv=$(basename "$(readlink -f "/sys/class/net/$iface/device/driver" 2>/dev/null)" 2>/dev/null || echo unknown)
+	if [ -d /sys/module/mac80211/holders ] && [ -e "/sys/module/mac80211/holders/$drv" ]; then
+		say "$iface driver $drv is SoftMAC (mac80211): hostapd builds the beacon"
+		return 0
+	fi
+	[ "${ALLOW_FULLMAC:-0}" = 1 ] &&
+		{ say "WARNING: $iface driver $drv is not a mac80211 holder (FullMAC?); ALLOW_FULLMAC=1, so continuing. Trust only the capture"; return 0; }
+	die "$iface driver $drv does not use mac80211, so its firmware builds the beacon and may silently drop the Interworking element. Use a SoftMAC radio (the AR9271 dongles are ath9k_htc), or set ALLOW_FULLMAC=1 if you mean to test the FullMAC path"
+}
+
 # refuse a radio that is doing something else; a car link must not be disturbed.
 check_idle() {
 	iface=$1
@@ -117,8 +144,10 @@ cmd_run() {
 	trial=$1
 	[ $# -ge 2 ] && SECS=$2
 	conf=$(compose "$trial")
+	need_cmd iw hostapd tcpdump
 	check_idle "$AP_IFACE"
 	check_idle "$MON_IFACE"
+	check_softmac "$AP_IFACE"
 	ch=$(ap_channel)
 	[ -n "$ch" ] || die "no channel= in the baseline config"
 	mkdir -p "$CAPDIR"

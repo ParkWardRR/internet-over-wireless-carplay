@@ -30,7 +30,44 @@ The first two rows already constrain the idea more than the review assumed. The 
 ### Two corrections to the earlier advice
 
 - **No ready-made Apple IE hex string.** An earlier version of this idea named an `InternetAccess` bit and implied it could be dropped into hostapd's `vendor_elements`. It cannot. The bit names in [`recon/ieaudit/apple.go`](../recon/ieaudit/apple.go) and [`scripts/car-ie.swift`](../scripts/car-ie.swift) come from third-party copies of an Apple header and from open-source head-unit projects. That provenance is enough to decode a capture and argue about it; it is not enough to transmit. Trials C and D are blocked on this, and [`test-ap/trials/C-apple-ie.conf.blocked`](../test-ap/trials/C-apple-ie.conf.blocked) does not load.
-- **"Networking IE" is the transcript's word, not a specification's.** Session 717 names the Interworking IE earlier and says "Networking IE" at 33:25. The standards-based experiment uses the 802.11u **Interworking** element (ID 107, 802.11-2020 9.4.2.91), which is the one with a published layout and a hostapd option. If a distinct Apple "Networking IE" exists, we have no definition for it.
+- **"Networking IE" was a transcript artefact — resolved.** Apple's own slides for session 717 say **Interworking IE**; the "Networking IE" wording came from the auto-transcript at 33:25. There is no separate unidentified Apple signalling format to hunt for, and the standards-based experiment uses the 802.11u **Interworking** element (ID 107, 802.11-2020 9.4.2.91) as planned.
+
+## Prior art (2026-11-14)
+
+A deeper search found implementation-level material. **None of it demonstrates the outcome we want** — nobody has published a phone that automatically uses an external internet route on genuine NBT EVO CarPlay after every restart because the AP's elements were changed. What it does supply is one hard-won pitfall, one new capability, and one confusion to avoid.
+
+| Source | What it establishes | What it does not |
+|---|---|---|
+| Apple's [session 717 slides](https://devstreaming-cdn.apple.com/videos/wwdc/2017/717tmz5rl6c2t2k/717/717_developing_wireless_carplay_systems.pdf?dl=1) (PDF, not the transcript) | Names the Apple Device IE **and the Interworking IE** as the mechanisms for communicating internet connectivity and changes to it | Anything about consent, or its persistence across ignition cycles |
+| [Ciellee's CarPlay AP notes](https://blog.csdn.net/Ciellee/article/details/118112471) (CSDN, Chinese) | A real CarPlay AP configuring Interworking and Apple vendor elements in hostapd — and **the element never reached the air until the Wi-Fi driver was patched** to pass it down (`WL11U`, `wl_cfg80211_start_ap()`) | A validated internet-capable Apple IE. Its example is `internet=0` with `access_network_type=3`, and its Apple IE payload is identity fields — name, manufacturer, model, Bluetooth MAC, device ID — not a capability template |
+| [Runtime vendor-IE notes](https://blog.csdn.net/weixin_43209963/article/details/128860397) (CSDN, Chinese) | hostapd's control interface can change advertised elements **without restarting the AP**: `SET vendor_elements <hex>`, `SET assocresp_elements <hex>`, `UPDATE_BEACON` | That any given hostapd build supports it, or that iOS re-evaluates CarPlay internet eligibility when those fields change |
+| [Reverse Engineering SE: the Apple beacon tag](https://reverseengineering.stackexchange.com/questions/31710/decoding-the-apple-vendor-tag-in-the-802-11-beacon) | A captured **Personal Hotspot** element, OUI `00:17:f2` type 6, which macOS surfaces as `IOS_IE` and uses to recognise a hotspot | Any link to CarPlay. The author leaves that explicitly open |
+
+**The two Apple OUIs are different mechanisms and must not be swapped.**
+
+| Mechanism | OUI | Question it bears on |
+|---|---|---|
+| CarPlay Apple Device IE | `00:a0:40` type 0 | Accessory identity and capability advertisement |
+| Apple Personal Hotspot element | `00:17:f2` type 6 | Whether something is recognised *as* a hotspot |
+
+`ieaudit` now decodes both and labels them apart, so a capture cannot file one under the other. The two published hotspot examples disagree in one octet (`…03 03 00 00` captured versus `…03 01 00 00` in an OpenWrt example) and the field meanings are unresolved, so it prints the payload rather than interpreting it. Impersonating a hotspot is at best a secondary experiment: macOS recognising a hotspot says nothing about an iPhone promoting a CarPlay-managed network to its default path.
+
+**Trials C and D stay blocked.** The Ciellee Apple IE example is the best public lead on the element's *structure*, and it is still not an internet-capable template: it demonstrates no A/B test of a capability bit, and it embeds another vehicle's device identities, which the exclusions below rule out copying.
+
+### The pitfall that changes gate 1's acceptance criteria
+
+A CarPlay developer configured `interworking=1`, hostapd accepted it, the generated configuration contained it — and the element was not transmitted, because the driver had no code to install it into the beacon. Four observations, only one of which is evidence:
+
+| Observation | What it licenses you to conclude |
+|---|---|
+| hostapd accepts `internet=1` | The config parser accepted it |
+| The generated config contains the option | The config layer passed it through |
+| **An independent capture shows the changed element** | **The advertisement actually changed** |
+| Phone behaviour changes across repeated controlled trials | The advertisement affects this phone's policy |
+
+This is why `ap-signal-test.sh` takes its verdict from a second radio and never from the config file — a decision made before this source was found, and now ratified by someone who paid for it.
+
+**On our hardware the trap is specific and avoidable.** It bites FullMAC radios, where firmware builds the beacon and the driver must hand each extra element down. On SoftMAC (mac80211) drivers hostapd builds the whole beacon and the kernel transmits it verbatim. On the SBC: `car-a` and `car-b` are **ath9k_htc — SoftMAC, fine**; `wlan0` is the onboard Broadcom **`bcmsdh_sdmmc` — FullMAC, exactly the trap**. `ap-signal-test.sh` now refuses a non-mac80211 AP radio unless `ALLOW_FULLMAC=1`.
 
 ## Gate 0 — trace the rank before buying anything
 
@@ -59,6 +96,8 @@ This proves tooling, not policy. A hostapd configuration file is not evidence of
 | Uplink | Garage Ethernet | Keeps upstream Wi-Fi behaviour out of the experiment |
 | Management | Wired | So a bad config does not cut off the session that would fix it |
 | Phone instrumentation | CarNet Probe, plus logs | Separates Wi-Fi-bound connectivity from default-path connectivity |
+
+**Not yet installed on the SBC** (checked 2026-11-14): neither `iw` nor `hostapd` is present. `apt-get install iw hostapd tcpdump` first, then let `run` verify the hostapd build has `CONFIG_INTERWORKING=y` — it fails loudly on `unknown configuration item`, which is the cheap half of the Ciellee pitfall. Both AR9271 dongles are also assigned to cars, so gate 1 needs a window with carplayd stopped, or a third dongle.
 
 Run it:
 
@@ -118,6 +157,24 @@ Only after gates 0–2. Keep the data plane frozen: do not add NAT64/DNS64, chan
 | D | 1 | validated internet-capable form | The combined OEM-style advertisement | **blocked** |
 
 C is deliberately self-contradictory. It is a diagnostic, never a deployment configuration.
+
+**Trial E — a live internet-state change, no reassociation.** Apple's guidance is that a head unit communicates connectivity changes *dynamically*, e.g. when its internet module fails. Every trial above changes the advertisement and then reassociates, which mixes two variables. hostapd's control interface can change advertised elements in place:
+
+```text
+SET vendor_elements <hex>       # Apple bytes — blocked, see above
+SET assocresp_elements <hex>
+UPDATE_BEACON
+```
+
+E is **not blocked**, because the standard Interworking bit needs no Apple bytes. The method does need verifying: whether this hostapd build accepts the field at runtime at all, and whether the beacon on air actually changes while the association persists — both answerable with the same second radio. It separates three questions the A/B matrix cannot:
+
+| Sub-trial | What it isolates |
+|---|---|
+| Internet-capable before association | Whether iOS treats the initial connection differently |
+| Flipped after association | Whether iOS reacts to a live connectivity change at all |
+| Flipped back when the upstream dies | Whether signalling helps the phone *stop* choosing the Wi-Fi path — which would also be useful to the current design |
+
+The last row is the one worth noting: it could pay off even if the no-tap goal fails, because departure and upstream-loss handling are live concerns in [status.md](status.md).
 
 C and D unblock on **a capture from a real internet-capable wireless CarPlay head unit in both its internet-on and internet-off states**, decoded with `ieaudit pcap`, showing which octets move. The F32 cannot be that reference: it transmits no Apple Device IE. Until then the bytes would be a guess, and a guessed IE yields a trial nobody can interpret — the phone ignoring it proves nothing if the bytes were wrong, and the phone reacting proves nothing about which field did the work.
 
@@ -197,7 +254,7 @@ Sanitized. Empty until gate 0 produces something.
 
 | Path | What |
 |---|---|
-| [`recon/ieaudit/`](../recon/ieaudit) | Go decoder and validator for Interworking and Apple vendor elements; `hex`, `pcap`, `check`. Rejects malformed lengths and truncated captures, masks identity-bearing fields, and shares its canned test vector with `car-ie.swift` — the two decoders were run against it and agree (2026-11-13). Filter captures with `--bssid`: `--ssid` cannot match a beacon whose elements are too damaged to read, which is the case most worth seeing |
+| [`recon/ieaudit/`](../recon/ieaudit) | Go decoder and validator for Interworking and **both** Apple vendor elements — the CarPlay Device IE (`00:a0:40`) and the Personal Hotspot element (`00:17:f2`), labelled apart; `hex`, `pcap`, `check`. Rejects malformed lengths and truncated captures, masks identity-bearing fields, and shares its canned test vector with `car-ie.swift` — the two decoders were run against it and agree (2026-11-13). Filter captures with `--bssid`: `--ssid` cannot match a beacon whose elements are too damaged to read, which is the case most worth seeing |
 | [`test-ap/hostapd-base.conf.example`](../test-ap/hostapd-base.conf.example) | The constant baseline. Copy to `secrets/ap-test.conf` |
 | [`test-ap/trials/`](../test-ap/trials) | One fragment per trial — the advertisement delta and nothing else |
 | [`scripts/ap-signal-test.sh`](../scripts/ap-signal-test.sh) | Compose, run, capture, verify, tear down |

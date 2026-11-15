@@ -143,6 +143,29 @@ func decodeHex(s string) ([]byte, error) {
 	return hex.DecodeString(s)
 }
 
+// renderVendor describes a vendor-specific element, naming which Apple
+// mechanism it is. The two Apple OUIs answer different questions and must not
+// be reported as the same thing. ok is false for elements worth ignoring.
+func renderVendor(e element) (line string, ok bool) {
+	oui, vtype, body, err := vendorOUI(e)
+	if err != nil {
+		return err.Error(), true
+	}
+	switch {
+	case oui == appleOUI && vtype == appleVendorType:
+		a, aerr := parseAppleIE(body)
+		if aerr != nil {
+			return "apple-device-ie: " + aerr.Error(), true
+		}
+		return "apple-device-ie: " + a.String(), true
+	case oui == appleHotspotOUI && vtype == appleHotspotVendorType:
+		return fmt.Sprintf("apple-hotspot-ie: payload=%s (OUI 00:17:f2 type 6 — Personal Hotspot recognition, NOT the CarPlay Apple Device IE; fields unresolved)", hexs(body)), true
+	case oui == appleOUI || oui == appleHotspotOUI:
+		return fmt.Sprintf("apple vendor element oui=%s type=%d len=%d (unknown vendor type)", hexs(oui[:]), vtype, len(body)), true
+	}
+	return fmt.Sprintf("vendor oui=%s type=%d len=%d (not an Apple element)", hexs(oui[:]), vtype, len(body)), false
+}
+
 // describeElements renders the elements this tool knows about. The returned
 // error is the first malformation; lines parsed before it are still returned.
 func describeElements(blob []byte) ([]string, error) {
@@ -158,21 +181,8 @@ func describeElements(blob []byte) ([]string, error) {
 			}
 			out = append(out, w.String())
 		case e.ID == 221:
-			oui, vtype, body, verr := vendorOUI(e)
-			if verr != nil {
-				out = append(out, verr.Error())
-				continue
-			}
-			if oui != appleOUI || vtype != appleVendorType {
-				out = append(out, fmt.Sprintf("vendor oui=%s type=%d len=%d (not the Apple Device IE)", hexs(oui[:]), vtype, len(body)))
-				continue
-			}
-			a, aerr := parseAppleIE(body)
-			if aerr != nil {
-				out = append(out, "apple-device-ie: "+aerr.Error())
-				continue
-			}
-			out = append(out, "apple-device-ie: "+a.String())
+			line, _ := renderVendor(e)
+			out = append(out, line)
 		case e.ID == 0:
 			out = append(out, "ssid="+maskSSID(printable(e.Body)))
 		}
@@ -186,7 +196,7 @@ type bssSummary struct {
 	Beacons   int
 	Probes    int
 	IWSeen    map[string]int // rendered interworking -> count
-	Apple     map[string]int
+	Vendor    map[string]int
 	NoIW      map[int]int // subtype -> frames with no Interworking element
 	Malformed []string
 	Signal    int
@@ -233,7 +243,7 @@ func collect(path string, wantBSSID, wantSSID string) (map[string]*bssSummary, i
 		frames++
 		s := out[raw]
 		if s == nil {
-			s = &bssSummary{BSSID: raw, IWSeen: map[string]int{}, Apple: map[string]int{}, NoIW: map[int]int{}}
+			s = &bssSummary{BSSID: raw, IWSeen: map[string]int{}, Vendor: map[string]int{}, NoIW: map[int]int{}}
 			out[raw] = s
 		}
 		s.SSID, s.Signal = ssid, pk.Signal
@@ -260,20 +270,15 @@ func collect(path string, wantBSSID, wantSSID string) (map[string]*bssSummary, i
 				}
 				s.IWSeen[w.String()]++
 			case e.ID == 221:
-				oui, vtype, body, verr := vendorOUI(e)
-				if verr != nil {
-					s.Malformed = append(s.Malformed, fmt.Sprintf("%s: %v", subtypeName(subtype), verr))
+				line, interesting := renderVendor(e)
+				if !interesting {
 					continue
 				}
-				if oui != appleOUI || vtype != appleVendorType {
+				if strings.Contains(line, "malformed") {
+					s.Malformed = append(s.Malformed, fmt.Sprintf("%s: %s", subtypeName(subtype), line))
 					continue
 				}
-				a, aerr := parseAppleIE(body)
-				if aerr != nil {
-					s.Malformed = append(s.Malformed, fmt.Sprintf("%s: %v", subtypeName(subtype), aerr))
-					continue
-				}
-				s.Apple[a.String()]++
+				s.Vendor[line]++
 			}
 		}
 		if !sawIW {
@@ -303,11 +308,11 @@ func cmdPcap(pos []string, opts map[string]string, w io.Writer) error {
 		if len(s.IWSeen) == 0 {
 			fmt.Fprintln(w, "    no Interworking element")
 		}
-		for _, line := range sortedKeys(s.Apple) {
-			fmt.Fprintf(w, "    apple-device-ie: %s  x%d\n", line, s.Apple[line])
+		for _, line := range sortedKeys(s.Vendor) {
+			fmt.Fprintf(w, "    %s  x%d\n", line, s.Vendor[line])
 		}
-		if len(s.Apple) == 0 {
-			fmt.Fprintln(w, "    no Apple Device IE")
+		if len(s.Vendor) == 0 {
+			fmt.Fprintln(w, "    no Apple vendor element")
 		}
 		for _, m := range dedup(s.Malformed) {
 			fmt.Fprintf(w, "    MALFORMED %s\n", m)
@@ -374,10 +379,8 @@ func cmdCheck(pos []string, opts map[string]string, w io.Writer) error {
 	}
 	fmt.Fprintf(w, "PASS internet=%s  %s  ssid=%s  %d beacons, %d probe responses\n    %s\n",
 		want, maskMAC(mustMAC(s.BSSID)), maskSSID(s.SSID), s.Beacons, s.Probes, line)
-	if len(s.Apple) > 0 {
-		for _, l := range sortedKeys(s.Apple) {
-			fmt.Fprintf(w, "    apple-device-ie: %s  x%d\n", l, s.Apple[l])
-		}
+	for _, l := range sortedKeys(s.Vendor) {
+		fmt.Fprintf(w, "    %s  x%d\n", l, s.Vendor[l])
 	}
 	return nil
 }

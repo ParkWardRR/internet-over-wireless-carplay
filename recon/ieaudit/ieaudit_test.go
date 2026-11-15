@@ -246,8 +246,65 @@ func TestNonAppleVendorElementIsNotDecodedAsApple(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "not the Apple Device IE") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "not an Apple element") {
 		t.Fatalf("got %v", lines)
+	}
+}
+
+func TestPersonalHotspotElementIsNotTheCarPlayOne(t *testing.T) {
+	// Both published examples of the Personal Hotspot element. They disagree in
+	// one octet, so the decoder must report the payload, not interpret it — and
+	// above all must not file them under the CarPlay Apple Device IE.
+	for _, blob := range []string{
+		"dd0a0017f206010103030000", // captured from a real hotspot
+		"dd0a0017f206010103010000", // an OpenWrt vendor_elements example
+	} {
+		lines, err := describeElements(mustHex(t, blob))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(lines) != 1 {
+			t.Fatalf("%s: got %v", blob, lines)
+		}
+		if !strings.Contains(lines[0], "apple-hotspot-ie") {
+			t.Errorf("%s: got %q", blob, lines[0])
+		}
+		if strings.Contains(lines[0], "apple-device-ie") {
+			t.Errorf("%s: the two Apple OUIs answer different questions: %q", blob, lines[0])
+		}
+		if !strings.Contains(lines[0], "payload=010103") {
+			t.Errorf("%s: the payload must be printed verbatim: %q", blob, lines[0])
+		}
+	}
+}
+
+func TestUnknownAppleVendorTypeIsFlaggedNotGuessed(t *testing.T) {
+	// Apple OUI, a vendor type we have never seen. Reporting it as the Device
+	// IE would invent a decode; dropping it would hide a lead.
+	lines, err := describeElements(mustHex(t, "dd0500a0407faa"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "unknown vendor type") {
+		t.Fatalf("got %v", lines)
+	}
+}
+
+func TestPcapListsBothAppleElementsSeparately(t *testing.T) {
+	ies := mustHex(t, "6b0110"+"dd0800a04000000280 22"+"dd0a0017f206010103030000")
+	path := writePcap(t, "both.pcap", linkIEEE80211Radiotap,
+		beacon(8, testBSSID, "CarTest", ies),
+		beacon(5, testBSSID, "CarTest", ies),
+	)
+	var b strings.Builder
+	if err := cmdPcap([]string{path}, map[string]string{"bssid": "02:00:5e:11:22:33"}, &b); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{"apple-device-ie:", "apple-hotspot-ie:", "CarPlay", "internet=1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q missing from:\n%s", want, out)
+		}
 	}
 }
 
