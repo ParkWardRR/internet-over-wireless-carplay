@@ -581,6 +581,13 @@ func (d *daemon) startServing(car *Car) {
 	if err := run("ip", "-6", "addr", "replace", addr, "dev", d.cfg.STA, "nodad"); err != nil {
 		d.ev("error", "addr", err.Error())
 	}
+	// Before any RA goes out: the cap exists to stop our own traffic taking
+	// the head unit's CarPlay session down with it (see shape.go).
+	if err := applyShaping(d.cfg.STA, car.Rate, run); err != nil {
+		d.ev("error", "shape", err.Error())
+	} else if car.Rate != "" {
+		d.ev("shaped", car.ID, "rate="+car.Rate, "leaf="+strconv.Itoa(shapeLeafPackets)+"p")
+	}
 	d.freshHealth()
 	id := car.ID
 	ra, err := newRASender(d.cfg.STA, raParams{
@@ -622,6 +629,7 @@ func (d *daemon) stopServing(goodbye bool) {
 	if d.ra != nil {
 		d.ra.close()
 	}
+	clearShaping(d.cfg.STA, car.Rate, run)
 	run("ip", "-6", "addr", "del", car.Prefix.Addr().Next().String()+"/64", "dev", d.cfg.STA)
 	d.servingMu.Lock()
 	d.serving = nil

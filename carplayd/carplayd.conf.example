@@ -83,6 +83,25 @@ priority = 1
 # death with no goodbye and a phone left holding a dead route. tx_failed was the
 # only advance warning and gave about 8 s of it. A healthy link sits at 0-2/s.
 #fail_rate = 5
+# rate (default off): cap this car link's egress with HTB, so our own traffic
+# cannot take the head unit's CarPlay session down with it. The box and the
+# phone are both stations on the car's AP with no TDLS, so every byte we send is
+# relayed -- it crosses the air twice -- and CarPlay's own audio and screen
+# share that AP, that channel and the phone's one radio.
+#
+# Measured on the F22, 2026-11-16, iPhone streaming to CarPlay while bulk
+# downloading through the box:
+#   unshaped   round-trip to the phone up to 2051 ms at 3 packets/s, throughput
+#              collapsing to 1-4 kB/s, audible stutter, and under sustained load
+#              the head unit dropped CarPlay and needed a hard reset to re-pair
+#   rate=2mbit same load: 378 ms worst case, 30-130 ms typical, no collapse, no
+#              disconnect in 120 s. Peak throughput roughly halved
+#
+# Units are bit/kbit/mbit/gbit. "mbps" is rejected on purpose: tc reads it as
+# bytes, so it would cap eight times higher while looking configured.
+# Off by default -- a different head unit may not need it, and a silent throttle
+# is worse than none. Watch the `shaped` event and nonzero HTB drops to confirm.
+#rate = 2mbit
 
 [car B]
 ssid = BMW00002 CarPlay

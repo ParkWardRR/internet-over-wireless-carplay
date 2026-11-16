@@ -23,6 +23,7 @@ type Car struct {
 	Leave    int          // dBm: leave when weaker than this for LeaveFor
 	Rejoin   int          // dBm: after leaving, rejoin only at least this strong
 	Priority int          // higher wins when both cars are seen
+	Rate     string       // tc egress rate cap on this car's link ("2mbit"); "" = unshaped
 	Drop     int          // dB: also leave when the signal falls this far below where it sat 5-20 s ago (0 = off)
 	FailRate int          // tx_failed increments per second that mean the link is dying (0 = off)
 	Phy      string       // the wiphy this car is served on; cars sharing one take turns
@@ -403,6 +404,8 @@ func setCar(c *Car, k, v string) error {
 		c.Rejoin = atoi(v)
 	case "priority":
 		c.Priority = atoi(v)
+	case "rate":
+		c.Rate, err = normalizeRate(v)
 	case "drop":
 		c.Drop = atoi(v)
 	case "phy":
