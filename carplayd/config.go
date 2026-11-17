@@ -202,7 +202,19 @@ func parseConfig(r io.Reader) (Config, error) {
 				c.RateMin = "512kbit"
 			}
 			if c.RateMax == "" {
-				c.RateMax = "6mbit"
+				// 3 Mbit/s, not 6. Measured 2026-11-16: the head unit's
+				// client-to-client relay collapsed at about 3.8 Mbit/s of our
+				// traffic -- 60-87% packet loss, 2051 ms round trips, and
+				// CarPlay dropped hard enough to need a head-unit reset.
+				//
+				// The in-car airtime measurement the same evening is NOT a
+				// licence to raise this. It found CarPlay using only ~26% of
+				// the channel with ~20 Mbit/s of headroom left after halving
+				// for the relay -- so airtime is plentiful and is simply not
+				// the binding constraint. The relay is. A ceiling derived from
+				// free airtime would walk straight back into the failure that
+				// cost a hard reset.
+				c.RateMax = "3mbit"
 			}
 			if c.RateRTT == 0 {
 				c.RateRTT = 150 * time.Millisecond

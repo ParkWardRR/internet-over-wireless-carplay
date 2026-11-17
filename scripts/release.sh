@@ -65,7 +65,7 @@ if [ "$what" = testbin ]; then
 	testbin
 	exit 0
 fi
-for c in carplayd carrecon carnetbridge ieaudit; do
+for c in carplayd carrecon carnetbridge ieaudit airtime; do
 	[ "$what" = all ] || [ "$what" = "$c" ] || continue
 	case $c in
 	carplayd) dir=carplayd; archs="amd64 arm64" ;;
@@ -74,6 +74,8 @@ for c in carplayd carrecon carnetbridge ieaudit; do
 	# ieaudit decodes a capture rather than touching a radio, so it is built for
 	# the laptop doing the analysis as well as the box taking the capture.
 	ieaudit) dir=recon/ieaudit; archs="amd64 arm64" ;;
+	# airtime runs on the in-car Pi (arm64) and its -report mode on a laptop.
+	airtime) dir=recon/airtime; archs="amd64 arm64" ;;
 	esac
 	test_mod "$dir"
 	echo "building $c"

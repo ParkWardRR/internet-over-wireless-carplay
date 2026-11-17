@@ -233,7 +233,7 @@ func TestAutoRateConfigDefaultsAndValidation(t *testing.T) {
 	if c.Rate != "auto" {
 		t.Fatalf("rate = %q", c.Rate)
 	}
-	if c.RateMin != "512kbit" || c.RateMax != "6mbit" || c.RateRTT != 150*time.Millisecond {
+	if c.RateMin != "512kbit" || c.RateMax != "3mbit" || c.RateRTT != 150*time.Millisecond {
 		t.Fatalf("defaults not applied: min=%q max=%q rtt=%v", c.RateMin, c.RateMax, c.RateRTT)
 	}
 }
@@ -269,5 +269,27 @@ func TestFixedRateGetsNoAutoBounds(t *testing.T) {
 	}
 	if c.RateMin != "" || c.RateMax != "" || c.RateRTT != 0 {
 		t.Errorf("a fixed car picked up auto bounds: %+v", c)
+	}
+}
+
+// The ceiling must stay under the rate that actually broke the head unit.
+// Measured 2026-11-16: the relay collapsed at about 3.8 Mbit/s of our traffic.
+// The in-car airtime run that evening found ~20 Mbit/s of headroom, and that
+// must NOT raise this: airtime is not the binding constraint, the relay is.
+func TestDefaultRateMaxStaysUnderTheRelayBreakingPoint(t *testing.T) {
+	c := mustConfig(t, carConf("rate = auto\n")).Cars[0]
+	kbit, err := parseRateKbit(c.RateMax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const brokeAtKbit = 3800
+	if kbit >= brokeAtKbit {
+		t.Fatalf("default rate_max %s (%d kbit) is at or above the %d kbit that dropped CarPlay",
+			c.RateMax, kbit, brokeAtKbit)
+	}
+	// And it must still be above the one value measured safe, or auto mode
+	// could never reach a rate we know works.
+	if kbit <= autoRateStartKbit {
+		t.Fatalf("rate_max %d kbit is not above the measured-safe start %d kbit", kbit, autoRateStartKbit)
 	}
 }

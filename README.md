@@ -86,6 +86,22 @@ So the box now caps its own traffic to the car. With `rate = 2mbit` the same loa
 
 That is a mitigation, not a cure. Residual jitter remains, and the parts that cause it — your phone's Wi-Fi power save, the head unit's relay, CarPlay sharing one 2.4 GHz channel — are not ours to change.
 
+## How much Wi-Fi is actually left after CarPlay
+
+Measured from inside the car, not guessed. Every frame is converted to the microseconds it held the medium, because at 1×1 HT20 a frame at 1 Mbit/s costs roughly ten times the airtime of the same frame at MCS 7 — a byte counter calls a slow neighbour negligible when it is eating 5% of your channel.
+
+| | Median | p95 |
+|---|---|---|
+| **CarPlay's own airtime** (phone + head unit) | **26.5%** | 38.0% |
+| phone → head unit | 1,179 kB/s (9.4 Mbit/s) | 1,784 kB/s |
+| Channel busy with CarPlay up | 37.1% | 46.5% |
+| Channel busy with the car away (your neighbours) | 17.2% | 30.8% |
+| **Headroom left, halved for the relay** | **20.4 Mbit/s** | 17.2 (p5) |
+
+**But that headroom is not usable, and this is the important part.** The head unit's relay collapses at about 3.8 Mbit/s of our traffic — 60–87% packet loss, 2051 ms round trips, CarPlay dropped — while airtime is still largely free. **The bottleneck is the relay, not the air.** So the cap stays low on purpose: `rate_max` is 3 Mbit/s, chosen from the relay's breaking point, not from the 20 Mbit/s of idle channel.
+
+Full method and caveats: **[docs/bandwidth.md](docs/bandwidth.md)**. The tool is `recon/airtime` — it runs in the car on battery with no network.
+
 ## Does it work?
 
 Yes, on a real car, measured — most recently **44,327 packets / 6.2 MB** forwarded to a phone in a single day.
@@ -195,6 +211,7 @@ Full roadmap, acceptance criteria and open items: **[docs/status.md](docs/status
 | `carrecon/`, `tbeam/` | In-car recorder and the GPS/IMU beacon that timestamps a drive |
 | `emu/` | Emulator: OpenWrt image, `emu.sh`, Go agent and harness |
 | `recon/ieaudit/` | Decoder/validator for the Interworking and Apple Device elements |
+| `recon/airtime/` | Per-frame airtime accounting from inside the car: what CarPlay costs and what is left. `-report` analyses a run |
 | `scripts/rate-trial.sh` | Steps a car link through rates and records loaded latency, drops and your audio verdict |
 | `test-ap/`, `scripts/ap-signal-test.sh` | Controlled hostapd AP for the signalling experiment |
 | `ios/CarNetProbe` | iPhone diagnostics app |

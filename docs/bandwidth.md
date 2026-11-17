@@ -108,9 +108,31 @@ Empty until the above is run. Both cars, because only the F22 has ever been meas
 
 ### CarPlay's own consumption (Part 1)
 
-| Car | Condition | phone→head unit kB/s (median) | peak | Source |
-|---|---|---|---|---|
-| — | — | — | — | *not yet measured* |
+**Measured 2026-11-16, in the car, on battery, Ethernet unplugged.** 695 seconds of live CarPlay out of a 1,061-second run (F22; the car left at 21:32 and returned at 21:43).
+
+| Metric | Median | p95 | Max |
+|---|---|---|---|
+| **phone → head unit airtime** | **21.7%** | 32.4% | 38.9% of the channel |
+| **phone → head unit bytes** | **1,179 kB/s** (9.4 Mbit/s) | 1,784 kB/s | 2,190 kB/s |
+| **CarPlay total (phone + head unit)** | **26.5%** | 38.0% | 45.3% of the channel |
+| Channel busy, CarPlay active | 37.1% | 46.5% | 62.7% |
+| Channel busy, car away | 17.2% | 30.8% | 60.9% |
+
+So **the neighbourhood is ~17% and CarPlay adds about 20 points on top.** The phone was at −36 dBm from the recorder, which is why this had to be measured from inside the car: from the garage the same phone read −76 to −84 dBm and its stream was under-captured by an order of magnitude.
+
+### What is left for us
+
+| | Median | p5 |
+|---|---|---|
+| Channel idle | 62.9% | 53.5% |
+| Headroom at the best observed rate | 40.9 Mbit/s | 34.5 |
+| **Halved for the relay** | **20.4 Mbit/s** | **17.2** |
+
+### The conclusion that matters, and it is not the obvious one
+
+The inference at the top of this file — that CarPlay wanting ~19 Mbps of a ~25–30 Mbit/s link left "single-digit Mbit/s" — **was wrong.** CarPlay needs about 9.4 Mbit/s and a quarter of the airtime, and roughly 20 Mbit/s remains after halving for the relay.
+
+**That does not mean the cap can be raised.** The head unit's relay collapsed at about 3.8 Mbit/s of our traffic — 60–87% packet loss, 2051 ms round trips, CarPlay dropped hard enough to need a reset — while airtime was still largely free. **Airtime is not the binding constraint; the relay is.** Free airtime is therefore not evidence for a higher cap, and `rate_max` was lowered from 6 Mbit/s to 3 Mbit/s on the strength of the relay measurement, not raised on the strength of this one.
 
 ### Rate ladder (Part 2)
 
