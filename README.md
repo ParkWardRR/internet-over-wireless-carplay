@@ -192,6 +192,12 @@ The short version: **get both cars in the garage at once, and tap the switch on 
 
 Full roadmap, acceptance criteria and open items: **[docs/status.md](docs/status.md)**.
 
+## Documentation
+
+The **[wiki](https://github.com/ParkWardRR/internet-over-wireless-carplay/wiki)** is the place to start: setup, how it works, what the car's network actually is, what CarPlay costs, troubleshooting by symptom, and what is still unproven. Its source is in `wiki/` and is published with `scripts/wiki-sync.sh`.
+
+There is also a plain-language write-up of **[what was learned about wireless CarPlay](https://gist.github.com/ParkWardRR/0ac5011206022c1e42ef9c8ddf815e5a)** for people who want the findings without the implementation.
+
 ## Repo
 
 | Path | What |
@@ -215,6 +221,7 @@ Full roadmap, acceptance criteria and open items: **[docs/status.md](docs/status
 | `carrecon/`, `tbeam/` | In-car recorder and the GPS/IMU beacon that timestamps a drive |
 | `emu/` | Emulator: OpenWrt image, `emu.sh`, Go agent and harness |
 | `recon/ieaudit/` | Decoder/validator for the Interworking and Apple Device elements |
+| `wiki/`, `scripts/wiki-sync.sh` | Source of the GitHub wiki, and the publisher that refuses to push if the scrub check hits |
 | `recon/airtime/` | Per-frame airtime accounting from inside the car: what CarPlay costs and what is left. `-report` analyses a run |
 | `scripts/rate-trial.sh` | Steps a car link through rates and records loaded latency, drops and your audio verdict |
 | `test-ap/`, `scripts/ap-signal-test.sh` | Controlled hostapd AP for the signalling experiment |

@@ -1,0 +1,1 @@
+Claims are labelled **measured** / **source** / **emulator** / **inferred**. Dated evidence lives in `docs/test-log.md`. Measured on two BMW NBT EVO head units and one iPhone on iOS 27 — a data point, not a law.
