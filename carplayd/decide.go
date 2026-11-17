@@ -167,33 +167,14 @@ func shouldSwitch(now, servingSince, lastPhone time.Time, idle time.Duration, ot
 	return now.Sub(quietSince) >= idle
 }
 
-// neighbour is one line of `ip -6 neigh show dev X`.
+// neighbour is one entry of the device's IPv6 neighbour cache, as rtnetlink
+// reports it. The state word is the kernel's NUD state spelled the way
+// iproute2 spelled it, because that is what these rules and the event log are
+// written against.
 type neighbour struct {
 	addr  netip.Addr
 	mac   string
 	state string
-}
-
-func parseNeigh(out string) []neighbour {
-	var ns []neighbour
-	for _, l := range strings.Split(out, "\n") {
-		f := strings.Fields(l)
-		if len(f) < 2 {
-			continue
-		}
-		a, err := netip.ParseAddr(f[0])
-		if err != nil {
-			continue
-		}
-		n := neighbour{addr: a, state: f[len(f)-1]}
-		for i := 1; i+1 < len(f); i++ {
-			if f[i] == "lladdr" {
-				n.mac = strings.ToLower(f[i+1])
-			}
-		}
-		ns = append(ns, n)
-	}
-	return ns
 }
 
 func (n neighbour) alive() bool {
@@ -208,9 +189,9 @@ func (n neighbour) alive() bool {
 // neighbour entry in prefix. One iPhone holds several addresses at once
 // (stable + temporary), so counting addresses would overcount. Only phones
 // autoconfigure in our prefix (the head unit didn't on the real car).
-func phonesIn(neigh string, prefix netip.Prefix) int {
+func phonesIn(ns []neighbour, prefix netip.Prefix) int {
 	macs := map[string]bool{}
-	for _, n := range parseNeigh(neigh) {
+	for _, n := range ns {
 		if n.alive() && n.mac != "" && prefix.Contains(n.addr) {
 			macs[n.mac] = true
 		}
@@ -221,10 +202,10 @@ func phonesIn(neigh string, prefix netip.Prefix) int {
 // withdrawTargets picks one address per device on the link for a unicast
 // withdrawal RA: its link-local if we know it (a host acts on an RA to any of
 // its addresses), else an address in prefix.
-func withdrawTargets(neigh string, prefix netip.Prefix) []netip.Addr {
+func withdrawTargets(ns []neighbour, prefix netip.Prefix) []netip.Addr {
 	best := map[string]netip.Addr{}
 	var order []string
-	for _, n := range parseNeigh(neigh) {
+	for _, n := range ns {
 		if n.mac == "" || n.state == "FAILED" || n.state == "INCOMPLETE" {
 			continue
 		}

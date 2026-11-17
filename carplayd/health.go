@@ -92,11 +92,11 @@ func (d *daemon) neighbours() []netip.Addr {
 	if d.serving == nil {
 		return nil
 	}
-	out, err := exec.Command("ip", "-6", "neigh", "show", "dev", d.cfg.STA).Output()
+	ns, err := d.net().Neighbours(d.cfg.STA)
 	if err != nil {
 		return nil
 	}
-	return withdrawTargets(string(out), d.serving.Prefix)
+	return withdrawTargets(ns, d.serving.Prefix)
 }
 
 // homeBlock is what phones must not reach beyond the generic private ranges:
@@ -105,11 +105,11 @@ func (d *daemon) homeBlock() []netip.Prefix {
 	if d.cfg.Uplink == "" {
 		return slices.Clone(d.cfg.Block)
 	}
-	out, err := exec.Command("ip", "-6", "route", "show", "dev", d.cfg.Uplink).Output()
+	routes, err := d.net().OnLinkRoutes6(d.cfg.Uplink)
 	if err != nil {
 		return slices.Clone(d.cfg.Block)
 	}
-	return homePrefixes(string(out), d.cfg.Block)
+	return homePrefixes(routes, d.cfg.Block)
 }
 
 func (d *daemon) firewallOn() bool { return d.cfg.Firewall == "nft" || d.cfg.NAT66 == "nft" }

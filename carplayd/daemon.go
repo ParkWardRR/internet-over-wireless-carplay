@@ -15,6 +15,7 @@ import (
 
 type daemon struct {
 	cfg          Config
+	nl           netOps   // kernel interface; nil means the real rtnetlink
 	cmd          *wpaConn // requests
 	evc          *wpaConn // attached for events
 	events       chan string
@@ -213,7 +214,7 @@ func (d *daemon) setupSTA() error {
 			return err
 		}
 	}
-	if err := run("ip", "link", "set", c.STA, "up"); err != nil {
+	if err := d.net().LinkUp(c.STA); err != nil {
 		return err
 	}
 	run("iw", "dev", c.STA, "set", "power_save", "off") // best effort; not all drivers allow it
@@ -627,8 +628,8 @@ func raDNSFor(cfg Config, car *Car) []netip.Addr {
 }
 
 func (d *daemon) startServing(car *Car) {
-	addr := car.Prefix.Addr().Next().String() + "/64" // <prefix>::1
-	if err := run("ip", "-6", "addr", "replace", addr, "dev", d.cfg.STA, "nodad"); err != nil {
+	addr := netip.PrefixFrom(car.Prefix.Addr().Next(), 64) // <prefix>::1
+	if err := d.net().AddrReplace(d.cfg.STA, addr, true); err != nil {
 		d.ev("error", "addr", err.Error())
 	}
 	// Before any RA goes out: the cap exists to stop our own traffic taking
@@ -689,7 +690,7 @@ func (d *daemon) stopServing(goodbye bool) {
 	}
 	clearShaping(d.cfg.STA, car.Rate, run)
 	d.rateKbit, d.lastShape = 0, shapeStats{}
-	run("ip", "-6", "addr", "del", car.Prefix.Addr().Next().String()+"/64", "dev", d.cfg.STA)
+	_ = d.net().AddrDel(d.cfg.STA, netip.PrefixFrom(car.Prefix.Addr().Next(), 64))
 	d.servingMu.Lock()
 	d.serving = nil
 	d.servingMu.Unlock()
@@ -923,8 +924,8 @@ func (d *daemon) poll() {
 		return
 	}
 	d.lastSig = sig
-	if out, err := exec.Command("ip", "-6", "neigh", "show", "dev", d.cfg.STA).Output(); err == nil {
-		n := phonesIn(string(out), d.serving.Prefix)
+	if ns, err := d.net().Neighbours(d.cfg.STA); err == nil {
+		n := phonesIn(ns, d.serving.Prefix)
 		d.phones = n
 		if n > 0 {
 			d.lastPhone = now
@@ -961,7 +962,7 @@ func (d *daemon) poll() {
 			d.prof.Observe(d.serving.ID, sig, d.failPerSec, d.failPerSec <= 1)
 		}
 		d.checkValidated(n, now)
-		d.dbg("neigh", d.serving.ID, strings.Join(strings.Fields(strings.ReplaceAll(string(out), "\n", " | ")), " "))
+		d.dbg("neigh", d.serving.ID, formatNeigh(ns))
 	}
 	// Leave while the link is still usable: below the absolute threshold, or
 	// (drop > 0) well below where the signal sat 5-20 s ago, i.e. driving off.

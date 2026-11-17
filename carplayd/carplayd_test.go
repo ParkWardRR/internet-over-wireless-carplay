@@ -275,14 +275,14 @@ func TestPhonesIn(t *testing.T) {
 		"fe80::ff:fe00:100 lladdr 02:00:00:00:01:00 STALE\n" +
 		"fd5c:ba1e:f32:b::7 lladdr 02:00:00:00:04:00 STALE\n" +
 		"fd5c:ba1e:f32:a:1::5 lladdr 02:00:00:00:03:02 STALE\n"
-	if n := phonesIn(neigh, netip.MustParsePrefix("fd5c:ba1e:f32:a::/64")); n != 2 {
+	if n := phonesIn(parseNeigh(neigh), netip.MustParsePrefix("fd5c:ba1e:f32:a::/64")); n != 2 {
 		t.Errorf("phones = %d, want 2", n)
 	}
 }
 
 func TestPhonesInCompressed(t *testing.T) {
 	// fd00:1::5 is NOT in fd00::/64 even though the strings share "fd00:".
-	if n := phonesIn("fd00:1::5 lladdr 02:00:00:00:00:01 REACHABLE\nfd00::7 lladdr 02:00:00:00:00:02 REACHABLE\n", netip.MustParsePrefix("fd00::/64")); n != 1 {
+	if n := phonesIn(parseNeigh("fd00:1::5 lladdr 02:00:00:00:00:01 REACHABLE\nfd00::7 lladdr 02:00:00:00:00:02 REACHABLE\n"), netip.MustParsePrefix("fd00::/64")); n != 1 {
 		t.Errorf("phones = %d, want 1", n)
 	}
 }

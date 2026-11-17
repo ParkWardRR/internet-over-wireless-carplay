@@ -150,10 +150,11 @@ func TestPhonesInCountsDevices(t *testing.T) {
 		"fe80::681f:ff:fe00:1 lladdr 6a:1f:00:00:00:01 router REACHABLE\n" +
 		"fd5c:ba1e:f32:a::22 lladdr 6a:1f:00:00:00:02 DELAY\n" +
 		"fd5c:ba1e:f32:a::33 FAILED\n"
-	if n := phonesIn(neigh, netip.MustParsePrefix("fd5c:ba1e:f32:a::/64")); n != 2 {
+	ns := parseNeigh(neigh)
+	if n := phonesIn(ns, netip.MustParsePrefix("fd5c:ba1e:f32:a::/64")); n != 2 {
 		t.Errorf("phones = %d, want 2 devices", n)
 	}
-	got := withdrawTargets(neigh, netip.MustParsePrefix("fd5c:ba1e:f32:a::/64"))
+	got := withdrawTargets(ns, netip.MustParsePrefix("fd5c:ba1e:f32:a::/64"))
 	want := "fe80::681f:ff:fe00:1 fd5c:ba1e:f32:a::22"
 	var s []string
 	for _, a := range got {
@@ -165,12 +166,14 @@ func TestPhonesInCountsDevices(t *testing.T) {
 }
 
 func TestHomePrefixes(t *testing.T) {
-	routes := "2001:db8:7f00:1a2b::/64 proto ra metric 100 pref medium\n" +
-		"2001:db8:7f00:1a2c::/64 proto kernel metric 256 pref medium\n" +
-		"fd00:0:0:5::/64 proto kernel metric 256 pref medium\n" +
-		"fe80::/64 proto kernel metric 256 pref medium\n" +
-		"2001:db8:ffff::/48 via fe80::1 metric 1024 pref medium\n" +
-		"default via fe80::1 proto ra metric 100 pref medium\n"
+	// On-link routes only: the uplink's gatewayed and default routes are
+	// dropped upstream of this, by onLinkRoute (see TestOnLinkRoute).
+	routes := []netip.Prefix{
+		netip.MustParsePrefix("2001:db8:7f00:1a2b::/64"),
+		netip.MustParsePrefix("2001:db8:7f00:1a2c::/64"),
+		netip.MustParsePrefix("fd00:0:0:5::/64"),
+		netip.MustParsePrefix("fe80::/64"),
+	}
 	got := homePrefixes(routes, []netip.Prefix{netip.MustParsePrefix("2001:db8:100::/48")})
 	var s []string
 	for _, p := range got {

@@ -256,10 +256,14 @@ func (cfg Config) stas() []string {
 	return out
 }
 
-// homePrefixes turns `ip -6 route show dev <uplink>` into the prefixes a car
-// must not reach: every global on-link prefix, widened to /56 (the usual
-// delegation size, so sibling home VLANs are covered too), plus extra.
-func homePrefixes(routes string, extra []netip.Prefix) []netip.Prefix {
+// homePrefixes turns the uplink's on-link IPv6 routes into the prefixes a car
+// must not reach: every global one, widened to /56 (the usual delegation size,
+// so sibling home VLANs are covered too), plus extra.
+//
+// The caller supplies on-link routes only. That used to be decided here, by
+// looking for the word "via" in iproute2's output; it now comes from
+// rtnetlink's Gw field, which cannot be ambiguous.
+func homePrefixes(routes []netip.Prefix, extra []netip.Prefix) []netip.Prefix {
 	seen := map[netip.Prefix]bool{}
 	var out []netip.Prefix
 	add := func(p netip.Prefix) {
@@ -269,13 +273,8 @@ func homePrefixes(routes string, extra []netip.Prefix) []netip.Prefix {
 			out = append(out, p)
 		}
 	}
-	for _, l := range strings.Split(routes, "\n") {
-		f := strings.Fields(l)
-		if len(f) == 0 || f[0] == "default" || slices.Contains(f, "via") { // on-link only: routes via a gateway are the internet
-			continue
-		}
-		p, err := netip.ParsePrefix(f[0])
-		if err != nil || !p.Addr().Is6() || !p.Addr().IsGlobalUnicast() || p.Addr().IsPrivate() || p.Bits() >= 128 {
+	for _, p := range routes {
+		if !p.Addr().Is6() || !p.Addr().IsGlobalUnicast() || p.Addr().IsPrivate() || p.Bits() >= 128 {
 			continue
 		}
 		if p.Bits() > 56 {

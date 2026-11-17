@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"net/netip"
 	"os/exec"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -181,20 +179,15 @@ func (d *daemon) effectiveRate(car *Car) string {
 
 // phoneAddr returns one phone address on the serving car's prefix, or "".
 func (d *daemon) phoneAddr(car *Car) string {
-	out, err := exec.Command("ip", "-6", "neigh", "show", "dev", d.cfg.STA).Output()
+	ns, err := d.net().Neighbours(d.cfg.STA)
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) == 0 {
+	for _, n := range ns {
+		if !car.Prefix.Contains(n.addr) || n.addr == car.Prefix.Addr().Next() {
 			continue
 		}
-		a, err := netip.ParseAddr(f[0])
-		if err != nil || !car.Prefix.Contains(a) || a == car.Prefix.Addr().Next() {
-			continue
-		}
-		return f[0]
+		return n.addr.String()
 	}
 	return ""
 }
