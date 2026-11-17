@@ -114,7 +114,7 @@
 	   render at the same height and neither view is shrunk to fit the other. */
 	.views {
 		display: grid;
-		grid-template-columns: 1.41fr 1fr;
+		grid-template-columns: 1.65fr 1fr;
 		gap: 18px;
 		align-items: start;
 	}

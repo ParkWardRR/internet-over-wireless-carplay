@@ -23,9 +23,9 @@ export const SCENES: Scene[] = [
 		tab: 'Above ground',
 		title: 'Two connections, and they are not related',
 		body:
-			'The head unit runs a small private Wi-Fi network and the phone joins it. That is all ' +
-			'wireless CarPlay is: a cable replacement between phone and dashboard. It carries no ' +
-			'internet.\n' +
+			'Wireless CarPlay is a Wi-Fi network. The head unit is the access point and your phone ' +
+			'is a station on it, the way a laptop joins a café network. That is the whole of it: ' +
+			'a cable replacement between phone and dashboard, carrying no internet.\n' +
 			'The internet is the phone’s own business, over cellular, on a different radio to a ' +
 			'different place. Above ground both work, so nobody notices they are separate.',
 		underground: false,
@@ -39,12 +39,13 @@ export const SCENES: Scene[] = [
 		tab: 'In the garage',
 		title: 'Only one of them fails',
 		body:
-			'Underground the phone loses the tower. The CarPlay link is untouched — it never left ' +
-			'the car — so the dashboard stays lit, audio keeps playing, and a map already stored on ' +
-			'the phone still draws and still routes.\n' +
-			'What stops is anything that needs the network: a search, a route through an area with ' +
-			'no downloaded map, an uncached tile. CarPlay connected does not mean internet ' +
-			'connected.',
+			'Underground the phone loses the tower. CarPlay is untouched — it never left the car ' +
+			'— so the dashboard stays lit and a map already on the phone still routes. What stops ' +
+			'is anything needing the network: a search, a route through an area never downloaded, ' +
+			'an uncached tile.\n' +
+			'The house Wi-Fi is metres away and the phone cannot use it either. A Wi-Fi radio is on ' +
+			'one network at a time, and the phone’s is on the car’s — that is what ' +
+			'wireless CarPlay is. Joining the house network would mean leaving CarPlay.',
 		underground: true,
 		box: false,
 		cellular: false,
@@ -54,14 +55,15 @@ export const SCENES: Scene[] = [
 	{
 		id: 'box',
 		tab: 'With the box',
-		title: 'A second route, over the link that still works',
+		title: 'Add a second radio',
 		body:
-			'A Linux box in the garage joins the same CarPlay network as a second station, next to ' +
-			'the phone, and advertises itself as the only IPv6 router on that link. The phone picks ' +
-			'the route up by ordinary SLAAC; nothing is configured on the phone or the car.\n' +
-			'The box does not make internet. It forwards onto the house’s wired connection. And ' +
-			'because phone and box are both clients of the head unit, every packet is relayed by it ' +
-			'— across the same air, twice.',
+			'The box is the radio the phone does not have. It joins the car network as another ' +
+			'station, beside the phone, and advertises itself as the only IPv6 router on that link. ' +
+			'The phone takes the route by ordinary SLAAC — without leaving CarPlay, and without ' +
+			'anything configured on the phone or the car.\n' +
+			'The box does not make internet. It is wired to the house connection, the same one the ' +
+			'house Wi-Fi uses. And because phone and box are both clients of the head unit, every ' +
+			'packet is relayed by it — across the same air, twice.',
 		underground: true,
 		box: true,
 		cellular: false,

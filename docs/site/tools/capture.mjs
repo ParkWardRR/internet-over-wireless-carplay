@@ -88,9 +88,18 @@ const VARIANTS = {
 };
 
 const CAPTIONS = [
-	['Above ground', 'CarPlay to the dashboard. Cellular to the internet. Two separate links.'],
-	['In the garage', 'The tower is gone. CarPlay is untouched — it never left the car.'],
-	['With the box', 'A second station on the same Wi-Fi routes out over the house Ethernet.']
+	[
+		'Above ground',
+		'CarPlay is a Wi-Fi network to the dashboard. Cellular is the internet. Separate links.'
+	],
+	[
+		'In the garage',
+		'The tower is gone — and the house Wi-Fi is no help: the phone’s one radio is on the car’s.'
+	],
+	[
+		'With the box',
+		'A second radio joins the car network and routes out over the house Ethernet.'
+	]
 ];
 
 function arg(name, fallback) {

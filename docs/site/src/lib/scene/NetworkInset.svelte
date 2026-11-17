@@ -4,37 +4,39 @@
 
 	let { scene }: { scene: Scene } = $props();
 
-	const VIEW = { w: 540, h: 560 };
+	const VIEW = { w: 540, h: 656 };
 
 	// Fixed positions. Nothing moves between states; things appear, and the
 	// flows along them change. That is what makes the three states comparable.
+	//
+	// The house is here in every state, with its own Wi-Fi and its own line to
+	// the internet, because the question the picture has to answer is why the
+	// phone cannot simply use them.
 	const N = {
-		tower: { x: 48, y: 44, w: 150, h: 56, title: 'Cell tower', sub: 'mobile network' },
-		phone: { x: 48, y: 186, w: 150, h: 56, title: 'iPhone', sub: 'station' },
-		hu: { x: 342, y: 186, w: 150, h: 56, title: 'Head unit', sub: 'access point' },
-		box: { x: 342, y: 374, w: 150, h: 56, title: 'Linux box', sub: 'second station' },
-		router: { x: 342, y: 480, w: 150, h: 56, title: 'Home router', sub: 'the house’s line' },
-		net: { x: 48, y: 480, w: 150, h: 56, title: 'Internet', sub: '' }
+		tower: { x: 72, y: 36, w: 150, h: 56, title: 'Cell tower', sub: 'mobile network' },
+		phone: { x: 72, y: 186, w: 150, h: 56, title: 'iPhone', sub: 'one Wi-Fi radio' },
+		hu: { x: 346, y: 186, w: 150, h: 56, title: 'Head unit', sub: 'access point' },
+		wifi: { x: 72, y: 358, w: 150, h: 56, title: 'Home Wi-Fi', sub: 'the house network' },
+		box: { x: 346, y: 358, w: 150, h: 56, title: 'Linux box', sub: 'a second radio' },
+		router: { x: 346, y: 470, w: 150, h: 56, title: 'Home router', sub: 'the house line' },
+		net: { x: 346, y: 580, w: 150, h: 56, title: 'Internet', sub: '' }
 	};
 
-	const CAR_GROUP = { x: 24, y: 150, w: 492, h: 112 };
-	const GAR_GROUP = { x: 24, y: 330, w: 492, h: 116 };
+	const CAR_GROUP = { x: 56, y: 150, w: 460, h: 112 };
+	const HOUSE_GROUP = { x: 56, y: 322, w: 460, h: 226 };
 
 	// Link spines, and the parallel offsets the traffic flows ride on.
-	const CELL = { x: 123, y1: 100, y2: 186 };
-	const WIFI_CAR = { y: 214, x1: 198, x2: 342 };
-	const WIFI_BOX = { x: 417, y1: 242, y2: 374 };
-	const ETH = { x: 417, y1: 430, y2: 480 };
-	const ISP = { y: 508, x1: 342, x2: 198 };
+	const CELL = { x: 147, y1: 92, y2: 186 };
+	const WIFI_CAR = { y: 214, x1: 222, x2: 346 };
+	const HOME = { x: 147, y1: 242, y2: 358 };
+	const WIFI_BOX = { x: 421, y1: 242, y2: 358 };
+	const LAN = 'M 222 386 L 284 386 L 284 498 L 346 498';
+	const ETH = { x: 421, y1: 414, y2: 470 };
+	const ISP = { x: 421, y1: 526, y2: 580 };
 	const OFF = 9;
-	/** Where the unavailable marker sits on the cellular link. */
-	const CELL_MARK = 122;
 
-	const emptyNote = $derived(
-		scene.id === 'surface'
-			? 'The car’s network carries no internet. The phone’s own cellular does.'
-			: 'Nothing on this network reaches the internet.'
-	);
+	const CELL_MARK = 122;
+	const HOME_MARK = 300;
 </script>
 
 {#snippet node(n: { x: number; y: number; w: number; h: number; title: string; sub: string }, tone: string)}
@@ -82,36 +84,36 @@
 			</marker>
 		</defs>
 
-		<!-- grouping mirrors the physical view: these devices are in the car -->
+		<!-- grouping mirrors the physical view -->
 		<g class="group">
 			<rect x={CAR_GROUP.x} y={CAR_GROUP.y} width={CAR_GROUP.w} height={CAR_GROUP.h} rx="10" />
-			<text class="end" x={CAR_GROUP.x + CAR_GROUP.w - 16} y={CAR_GROUP.y + 24}>
-				IN THE CAR
+			<text class="end" x={CAR_GROUP.x + CAR_GROUP.w - 16} y={CAR_GROUP.y + 24}>IN THE CAR</text>
+		</g>
+		<g class="group">
+			<rect
+				x={HOUSE_GROUP.x}
+				y={HOUSE_GROUP.y}
+				width={HOUSE_GROUP.w}
+				height={HOUSE_GROUP.h}
+				rx="10"
+			/>
+			<text class="mid" x={HOUSE_GROUP.x + HOUSE_GROUP.w / 2} y={HOUSE_GROUP.y + 24}>
+				IN THE HOUSE
 			</text>
 		</g>
-
-		{#if scene.box}
-			<g class="group" in:fade={{ duration: 280, delay: 360 }} out:fade={{ duration: 140 }}>
-				<rect
-					x={GAR_GROUP.x}
-					y={GAR_GROUP.y}
-					width={GAR_GROUP.w}
-					height={GAR_GROUP.h}
-					rx="10"
-				/>
-				<text x={GAR_GROUP.x + 16} y={GAR_GROUP.y + 24}>IN THE GARAGE</text>
-			</g>
-		{/if}
 
 		<!-- physical links: solid, neutral. These exist regardless of traffic. -->
 		<g class="phys">
 			<line x1={CELL.x} y1={CELL.y1} x2={CELL.x} y2={CELL.y2} class:dead={!scene.cellular} />
 			<line x1={WIFI_CAR.x1} y1={WIFI_CAR.y} x2={WIFI_CAR.x2} y2={WIFI_CAR.y} />
+			<!-- the link the phone cannot have: its radio is already spoken for -->
+			<line x1={HOME.x} y1={HOME.y1} x2={HOME.x} y2={HOME.y2} class="dead" />
+			<path d={LAN} class="wired" fill="none" />
+			<line x1={ISP.x} y1={ISP.y1} x2={ISP.x} y2={ISP.y2} class="wired" />
 			{#if scene.box}
 				<g in:fade={{ duration: 280, delay: 360 }} out:fade={{ duration: 140 }}>
 					<line x1={WIFI_BOX.x} y1={WIFI_BOX.y1} x2={WIFI_BOX.x} y2={WIFI_BOX.y2} />
 					<line x1={ETH.x} y1={ETH.y1} x2={ETH.x} y2={ETH.y2} class="wired" />
-					<line x1={ISP.x1} y1={ISP.y} x2={ISP.x2} y2={ISP.y} class="wired" />
 				</g>
 			{/if}
 		</g>
@@ -162,35 +164,41 @@
 					/>
 					<line
 						class="flow internet"
-						x1={ISP.x1 - 4}
-						y1={ISP.y - OFF}
-						x2={ISP.x2 + 4}
-						y2={ISP.y - OFF}
+						x1={ISP.x + OFF}
+						y1={ISP.y1 + 4}
+						x2={ISP.x + OFF}
+						y2={ISP.y2 - 4}
 					/>
 				</g>
 			{/if}
 		</g>
 
-		<!-- the cellular link is still there; it just has nothing on the end -->
+		<!-- what is not available, and why -->
 		{#if !scene.cellular}
-			<g class="stop" in:fade={{ duration: 240, delay: 500 }}>
+			<g class="stop" in:fade={{ duration: 240, delay: 400 }}>
 				<circle cx={CELL.x} cy={CELL_MARK} r="12" />
 				<path
-					d="M {CELL.x - 5} {CELL_MARK - 5} l 10 10
-					   M {CELL.x + 5} {CELL_MARK - 5} l -10 10"
+					d="M {CELL.x - 5} {CELL_MARK - 5} l 10 10 M {CELL.x + 5} {CELL_MARK - 5} l -10 10"
 				/>
 			</g>
 		{/if}
+		<g class="stop">
+			<circle cx={HOME.x} cy={HOME_MARK} r="12" />
+			<path
+				d="M {HOME.x - 5} {HOME_MARK - 5} l 10 10 M {HOME.x + 5} {HOME_MARK - 5} l -10 10"
+			/>
+		</g>
 
 		<!-- nodes -->
 		{@render node(N.tower, scene.cellular ? 'live' : 'dim')}
 		{@render node(N.phone, 'live')}
 		{@render node(N.hu, 'live')}
+		{@render node(N.wifi, 'live')}
+		{@render node(N.router, 'live')}
+		{@render node(N.net, 'live')}
 		{#if scene.box}
 			<g in:fade={{ duration: 300, delay: 420 }} out:fade={{ duration: 140 }}>
 				{@render node(N.box, 'live')}
-				{@render node(N.router, 'live')}
-				{@render node(N.net, 'live')}
 			</g>
 		{/if}
 
@@ -205,24 +213,23 @@
 				Wi-Fi · the car network
 			</text>
 
+			<!-- the answer to "why not just use the house Wi-Fi" -->
+			<text class="mid fail" x={N.wifi.x + N.wifi.w / 2} y={N.wifi.y + 84}>
+				one radio, one network
+			</text>
+			<text class="mid muted" x={N.wifi.x + N.wifi.w / 2} y={N.wifi.y + 102}>
+				and it is on the car’s
+			</text>
+
 			{#if scene.box}
 				<g in:fade={{ duration: 300, delay: 460 }}>
-					<text class="end" x={WIFI_BOX.x - 14} y={WIFI_BOX.y1 + 44}>same Wi-Fi,</text>
-					<text class="end" x={WIFI_BOX.x - 14} y={WIFI_BOX.y1 + 62}>relayed by the AP</text>
-					<text class="end muted" x={WIFI_BOX.x - 14} y={WIFI_BOX.y1 + 82}>
-						so it crosses the air twice
-					</text>
-					<text class="start" x={ETH.x + 24} y={ETH.y1 + 32}>Ethernet</text>
+					<text class="end" x={WIFI_BOX.x - 14} y="284">same Wi-Fi,</text>
+					<text class="end" x={WIFI_BOX.x - 14} y="302">relayed by the AP</text>
+					<text class="end muted" x={WIFI_BOX.x - 14} y="320">so it crosses the air twice</text>
+					<text class="start" x={ETH.x + 20} y={ETH.y1 + 34}>Ethernet</text>
 				</g>
 			{/if}
 		</g>
-
-		<!-- when there is no route out, say so in the space where one would be -->
-		{#if !scene.box}
-			<g class="empty-note" in:fade={{ duration: 260, delay: 260 }}>
-				<text class="mid" x={VIEW.w / 2} y="396">{emptyNote}</text>
-			</g>
-		{/if}
 	</svg>
 </figure>
 
@@ -272,15 +279,18 @@
 		stroke-width: 1.4;
 		stroke-dasharray: 6 4;
 	}
-	.group text.end {
-		text-anchor: end;
-	}
 	.group text {
 		font-family: var(--font);
-		font-size: 12px;
+		font-size: 12.5px;
 		font-weight: 650;
 		letter-spacing: 0.08em;
 		fill: var(--ink-faint);
+	}
+	.group text.end {
+		text-anchor: end;
+	}
+	.group text.mid {
+		text-anchor: middle;
 	}
 
 	.node rect {
@@ -294,13 +304,13 @@
 	}
 	.node .n-title {
 		font-family: var(--font);
-		font-size: 17px;
+		font-size: 18px;
 		font-weight: 650;
 		fill: var(--ink);
 	}
 	.node .n-sub {
 		font-family: var(--font);
-		font-size: 13.5px;
+		font-size: 14.5px;
 		fill: var(--ink-faint);
 	}
 	.node.dim .n-title,
@@ -308,15 +318,17 @@
 		fill: var(--ink-faint);
 	}
 
-	.phys line {
+	.phys line,
+	.phys path {
 		stroke: var(--link);
 		stroke-width: 3;
 	}
-	.phys line.wired {
+	.phys .wired {
 		stroke-width: 4.5;
 		stroke-linecap: round;
+		stroke-linejoin: round;
 	}
-	.phys line.dead {
+	.phys .dead {
 		stroke: var(--unavail);
 		stroke-dasharray: 5 5;
 		stroke-width: 2.4;
@@ -358,7 +370,7 @@
 
 	.link-label text {
 		font-family: var(--font);
-		font-size: 14px;
+		font-size: 15px;
 		font-weight: 550;
 		fill: var(--ink-soft);
 	}
@@ -372,7 +384,7 @@
 		text-anchor: start;
 	}
 	.link-label text.muted {
-		font-size: 13px;
+		font-size: 13.5px;
 		font-weight: 450;
 		fill: var(--ink-faint);
 	}
@@ -381,14 +393,8 @@
 		font-weight: 600;
 	}
 
-	.empty-note text {
-		font-family: var(--font);
-		font-size: 14.5px;
-		fill: var(--ink-faint);
-		text-anchor: middle;
-	}
-
-	/* See the note in PhysicalScene: stacked, the drawing is half as wide. */
+	/* Stacked on a narrow screen, this drawing is about half as wide, so the
+	   type grows inside the viewBox rather than shrinking with it. */
 	@media (max-width: 640px) {
 		.node .n-title {
 			font-size: 21px;
@@ -404,9 +410,6 @@
 		}
 		.group text {
 			font-size: 15px;
-		}
-		.empty-note text {
-			font-size: 16px;
 		}
 	}
 </style>

@@ -36,19 +36,32 @@
 				change what the car broadcasts about itself. <span class="tag">measured</span>
 			</p>
 			<p>
-				Two things about it turn out to be load-bearing. There is <strong>no client
-				isolation</strong>, so a second device may join and the head unit will relay between
-				its clients. And the head unit sends <strong>no IPv6 router advertisements</strong> of
-				its own. <span class="tag">measured</span>
+				This is also the answer to the obvious question: <strong>why can the phone not just
+				use the house Wi-Fi while it is parked at home?</strong> Because wireless CarPlay
+				<em>is</em> the phone's Wi-Fi. A radio is associated with one network at a time, and
+				the phone has one of them — so for as long as CarPlay is running, that radio is on
+				the car's network. Joining the house network means leaving CarPlay. The house Wi-Fi
+				can be a few metres overhead and it makes no difference.
+			</p>
+			<p>
+				Two things about the car network turn out to be load-bearing. There is <strong>no
+				client isolation</strong>, so a second device may join and the head unit will relay
+				between its clients. And the head unit sends <strong>no IPv6 router
+				advertisements</strong> of its own. <span class="tag">measured</span>
 			</p>
 		</section>
 
 		<section>
 			<h2>How this project supplies an internet route</h2>
 			<p>
-				A small Linux box in the garage joins the car's network as an ordinary second station,
-				one radio per car. It <strong>does not touch IPv4</strong>: it takes a DHCP lease like
-				any other client and adds nothing there. The car owns IPv4 and keeps it.
+				The box is, before anything else, <strong>the second radio the phone does not
+				have</strong>. It joins the car's network as an ordinary station beside the phone —
+				one adapter per car, since they cannot be shared — while staying wired to the house.
+				Nothing has to leave CarPlay for the phone to get a route.
+			</p>
+			<p>
+				It <strong>does not touch IPv4</strong>: it takes a DHCP lease like any other client
+				and adds nothing there. The car owns IPv4 and keeps it.
 			</p>
 			<p>
 				Instead it becomes the one thing the link is missing — <strong>the only IPv6 router on

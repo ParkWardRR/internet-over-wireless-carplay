@@ -89,6 +89,13 @@
 			<rect x="536" y="196" width="54" height="52" />
 		</g>
 
+		<!-- The house has Wi-Fi, and it reaches down here. The phone still
+		     cannot use it; the inset is where that is explained. -->
+		<g class="home-ap">
+			<rect x="488" y="214" width="24" height="15" rx="3" />
+			<path d="M 494 208 a 9 9 0 0 1 12 0 M 490 201 a 15 15 0 0 1 20 0" class="waves" />
+		</g>
+
 		<!-- the excavation -->
 		<g class="concrete">
 			<rect
@@ -228,6 +235,7 @@
 		<!-- labels: few, and large enough to read -->
 		<g class="label">
 			<text class="muted" x="12" y="322">street level</text>
+			<text class="mid muted" x="500" y="272">home Wi-Fi</text>
 			<text class="mid" x="688" y="100">cell tower</text>
 			{#if scene.box}
 				<g in:fade={{ duration: 300, delay: 480 }}>
@@ -269,6 +277,18 @@
 		border: 1px solid var(--rule);
 		border-radius: 10px;
 		background: var(--paper-raised);
+	}
+
+	.home-ap rect {
+		fill: var(--ink-soft);
+		stroke: var(--ink);
+		stroke-width: 1.2;
+	}
+	.home-ap .waves {
+		fill: none;
+		stroke: var(--ink-faint);
+		stroke-width: 2;
+		stroke-linecap: round;
 	}
 
 	.structure rect,

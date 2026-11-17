@@ -85,6 +85,15 @@ off, because `prefers-reduced-motion` turns it off. Watch for keyframes that
 end at `opacity: 0`: with motion reduced the element never animates and simply
 disappears. The tower's coverage arcs have a resting opacity for that reason.
 
+**The house is in the inset in every state.** Its Wi-Fi, its router and its
+line to the internet are drawn whether or not the box exists, because the
+question a reader arrives with is *why can the phone not just use the house
+Wi-Fi?* The answer is on the crossed link from the phone: a Wi-Fi radio is
+associated with one network at a time and the phone has one of them, so for as
+long as CarPlay runs that radio is on the car's. The repo says this in
+`carplayd/shape.go` and `wiki/Hardware.md`. It is also why the box is labelled
+*a second radio* rather than *a second station* — that is the point of it.
+
 **The route marker moves; it does not simply recolour.** Underground a red ✕
 sits against the slab, labelled *no path out*. When the box arrives the
 cellular path is still blocked — nothing has changed overhead — so the marker
