@@ -65,12 +65,15 @@ if [ "$what" = testbin ]; then
 	testbin
 	exit 0
 fi
-for c in carplayd carrecon carnetbridge; do
+for c in carplayd carrecon carnetbridge ieaudit; do
 	[ "$what" = all ] || [ "$what" = "$c" ] || continue
 	case $c in
 	carplayd) dir=carplayd; archs="amd64 arm64" ;;
 	carrecon) dir=recon/carrecon; archs="amd64 arm64" ;;
 	carnetbridge) dir=recon/carnetbridge; archs="amd64 arm64" ;;
+	# ieaudit decodes a capture rather than touching a radio, so it is built for
+	# the laptop doing the analysis as well as the box taking the capture.
+	ieaudit) dir=recon/ieaudit; archs="amd64 arm64" ;;
 	esac
 	test_mod "$dir"
 	echo "building $c"

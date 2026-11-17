@@ -74,13 +74,25 @@ So you tap *Check For Internet Access*, then *Use For Internet*, and it works.
 
 The box tells you which state you are in rather than leaving you guessing. It logs `phone_unvalidated` with the fix in the message, and `validated` once the phone's traffic appears. `nft list counters` answers "did the tap land?" directly.
 
+## Don't saturate it
+
+The second thing that catches people out, and it is worse than the tap.
+
+Your phone and the box are both clients of the car's AP, and the head unit **relays between them** — so every byte you download crosses the air twice, on the same channel, sharing it with CarPlay's own audio and screen. Push it hard and CarPlay suffers: audio stutters, and on this head unit a sustained saturation **dropped CarPlay entirely and needed a hard reset of the NBT EVO to pair again.**
+
+Measured: unshaped, the round trip from box to phone reached **2051 ms** at three packets per second, and throughput collapsed to 1–4 kB/s.
+
+So the box now caps its own traffic to the car. With `rate = 2mbit` the same load gave a **378 ms** worst case, 30–130 ms typically, and no disconnect. The cost is honest and you will notice it: **bulk downloads are capped at roughly 250 kB/s.** Set `rate = off` if you would rather have the speed and take the risk.
+
+That is a mitigation, not a cure. Residual jitter remains, and the parts that cause it — your phone's Wi-Fi power save, the head unit's relay, CarPlay sharing one 2.4 GHz channel — are not ours to change.
+
 ## Does it work?
 
 Yes, on a real car, measured — most recently **44,327 packets / 6.2 MB** forwarded to a phone in a single day.
 
 The honest caveat: **one car at a time is proven, both cars at once is not.** There are two cars here, an F22 and an F32. The F22 is the one currently working. The F32 was proven back in November 2026 on an older single-radio setup and has not been in the garage since the per-car radios went in, so it has never run on the current build. Nothing suggests a fault — its radio is healthy and hunting, the car is just elsewhere.
 
-Also built but never actually used by a phone: **NAT64**, for reaching IPv4-only machines on your home network. It is deployed and the translator is up, but its tunnel has carried three packets, all outbound.
+**NAT64 was quietly broken until 2026-11-16.** It is what lets the phone reach IPv4-only hosts over an IPv6-only path, and it only ever worked for three hardcoded addresses: the synthesised prefix sits inside `fc00::/7`, which the isolation rules reject, and the only exceptions were the named home hosts. So every IPv4-only *public* site was refused while DNS handed the phone a perfectly routable-looking address for it — Reddit, which has no native IPv6, is how it surfaced. Fixed by rejecting the synthesised form of each private IPv4 range and then permitting the rest. Deployed; **not yet confirmed by a phone**, so the box counts it (`nat64_public`) rather than assuming.
 
 Full status, per car, with dates: **[docs/status.md](docs/status.md)**. Every test ever run: **[docs/test-log.md](docs/test-log.md)**.
 
@@ -107,7 +119,9 @@ The car hands out IPv4 with no router and no DNS, and sends no router advertisem
 - **Leaves before the link dies, and says goodbye.** Departures here don't fade politely — the signal stays flat and then the link drops. So it leaves on the driver's `tx_failed` rate climbing, which buys about 8 seconds of warning where RSSI gives none. On a real drive: 3 leaves, 3 goodbye RAs, no stranded routes.
 - **Learns its own thresholds.** Fixed dBm can't work here: the box sits behind a cinderblock wall where "parked" and "dying" overlap, and every number moves when a car parks differently or a radio is swapped. Each car's healthy band is learned at runtime, persisted, and re-learned when the world changes.
 - **Recovers a deaf radio.** The AR9271 sometimes stops receiving while reporting itself healthy. A run of empty scans on a channel that always has neighbours means the radio, not the world, and it gets rebuilt without disturbing the other car.
-- **Reaches IPv4-only hosts** through DNS64 + NAT64, allowlisted to named hosts. Deployed, not yet exercised by a phone.
+- **Caps its own traffic to the car** so it cannot take CarPlay down with it (see above). HTB with a short queue, per car, off by default.
+- **Reaches IPv4-only hosts** through DNS64 + NAT64: the public IPv4 internet, plus named private hosts by allowlist. Private ranges are rejected by range rather than by enumeration, so opening the internet did not open the home LAN.
+- **Stops scanning on a channel it is already serving.** With a radio per car and both cars on channel 11, the idle radio was probing the live link's channel every second from an antenna inches away. It now backs off eightfold while a sibling serves — a backoff, not a halt, or a second car would never be found.
 - **Records both sides of a drive.** `carrecon` runs in the car in monitor mode, so a departure can be reconstructed from the air rather than only from the box's point of view.
 
 See [docs/findings.md](docs/findings.md) for what the measurements showed — including a leading hypothesis the data killed.
@@ -131,7 +145,8 @@ Measured on the box and the phone, not inferred.
 |---|---|---|
 | **The CarPlay AP** (both cars): 2.4 GHz channel 11, HT20, one stream; beacon offers WPA + WPA2 with a **TKIP group cipher** (iOS calls it "Weak Security"); negotiated **WPA2-PSK / CCMP pairwise / TKIP group**, Wi-Fi 4. The 802.11u Interworking **Internet bit is clear**; no Apple Device IE | `iw` scan + carplayd on both cars | ✅ 2026-11-03, re-confirmed on the F22 2026-11-14 |
 | DHCP gives 172.16.224.0/24 with **no router and no DNS**. Head unit is the AP at `172.16.224.1` and sends **no IPv6 RAs**. A **second client is allowed** and there is no client isolation, so the box can sit next to the phone | the box; [gearshifters](https://gearshifters.org/bmw/how-to-find-bmw-carplay-password/) copy of the Bimmerfest post; [Apple forum 76449](https://developer.apple.com/forums/thread/76449) | ✅ |
-| Phone ↔ box traffic is **relayed by the head unit**, so the box's RSSI to the car is not the phone's path quality | measured | ✅ |
+| Phone ↔ box traffic is **relayed by the head unit** (no TDLS), so the box's RSSI to the car is not the phone's path quality — and every forwarded byte crosses the air twice, competing with CarPlay's own stream. Saturating it reached **2051 ms** round trip and dropped the CarPlay session | measured | ✅ 2026-11-16 |
+| `ath9k_htc` reports `tx_retries`, `tx_failed`, `tx_duration` and `rx_duration` as **always 0** — they are unimplemented. Judge the link by its MCS rate instead. `iw survey dump` returns nothing on it either | measured | ✅ 2026-11-16 |
 | SSID digits are the last 5 of the VIN. The PSK is 10 random alphanumerics, delivered to the phone over Bluetooth, and **iOS 27 will show it** | the iPhone | ✅ 2026-11-02 |
 | **iOS 27** hides IP settings on the CarPlay network page and offers **Check For Internet Access**; passing it reveals **Use For Internet**. Known Networks still has **Configure IP** | the iPhone; [betaprofiles notes](https://forum.betaprofiles.com/t/whats-new-in-ios-27-beta-3/23195?page=2); [DiPlay #393](https://github.com/shihabal3amri/DiPlay/issues/393) | ✅ |
 | Why such a network carries no internet by default: configd gives a service ranked `Never` only a scoped default route, and *Use For Internet* lifts it. **Hypothesis from Apple's open source, not traced on the device.** Darwin asks for AAAA on a ULA-only network, so no public prefix is needed | configd, Libinfo, xnu ([iphone-diagnostics.md](docs/iphone-diagnostics.md#reading-the-probes)) | source only |
