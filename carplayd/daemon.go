@@ -176,6 +176,24 @@ func run(name string, args ...string) error {
 
 func writeSysctl(path, v string) error { return os.WriteFile(path, []byte(v), 0o644) }
 
+// ensureSysctl writes a sysctl and reads it back, because a write that appears
+// to succeed is not proof the value took: /proc can be read-only under a
+// restrictive container or hardened unit, and the failure is otherwise silent.
+// The read-back is what turns "we set it" into "it is set".
+func ensureSysctl(path, want string) error {
+	if err := writeSysctl(path, want); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("%s: wrote %s but could not read it back: %w", path, want, err)
+	}
+	if strings.TrimSpace(string(got)) != want {
+		return fmt.Errorf("%s: wrote %s but it reads %s", path, want, strings.TrimSpace(string(got)))
+	}
+	return nil
+}
+
 // setupSTA creates this link's STA netdev on its phy and tunes it. Separate
 // from setup so a stalled radio can have its interface rebuilt without
 // touching NAT, the firewall or the other links.
@@ -232,10 +250,29 @@ const natChain = "CARPLAYD"
 // setupNAT masquerades every car prefix out of the uplink (Debian/SBC; on
 // OpenWrt fw4's masq6 does this and nat66 stays "none").
 func (d *daemon) setupNAT() error {
+	// NAT64's IPv4 half, and independent of the NAT66 mode: tayga writes
+	// translated IPv4 packets onto its tun and the *kernel* has to forward
+	// them out the uplink. With this at 0 the translation is perfectly
+	// correct and the packets are then dropped, so every IPv4-only host
+	// fails while the box itself reaches them fine -- which is exactly how it
+	// presented on 2026-11-16, as "Reddit doesn't work" with a healthy box.
+	// This box forwards IPv6 because that is carplayd's whole job; nothing had
+	// ever needed the other knob, so NAT64 had never worked for a single
+	// public address.
+	//
+	// It does not widen the car's reach: each car link carries an explicit
+	// `meta nfproto ipv4 drop` in the nftables table, so the phone still has
+	// no IPv4 path of its own.
+	if d.cfg.NAT64.IsValid() {
+		if err := ensureSysctl("/proc/sys/net/ipv4/ip_forward", "1"); err != nil {
+			return fmt.Errorf("nat64 is configured but IPv4 forwarding could not be enabled, so the translator would drop every packet: %w", err)
+		}
+		d.ev("forwarding", "ipv4=1", "reason=nat64")
+	}
 	if d.cfg.NAT66 == "none" {
 		return nil
 	}
-	if err := writeSysctl("/proc/sys/net/ipv6/conf/all/forwarding", "1"); err != nil {
+	if err := ensureSysctl("/proc/sys/net/ipv6/conf/all/forwarding", "1"); err != nil {
 		return err
 	}
 	if d.cfg.NAT66 == "nft" {
