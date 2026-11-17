@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Tween } from 'svelte/motion';
 	import { cubicInOut } from 'svelte/easing';
-	import { fade } from 'svelte/transition';
+	import { draw, fade } from 'svelte/transition';
 	import * as P from './physical';
 	import type { Scene } from './scenes';
 
@@ -15,6 +15,21 @@
 	const pose = $derived(P.poseAt(travel.current));
 	const roof = $derived({ x: pose.x + P.CAR.roof.x, y: pose.y + P.CAR.roof.y });
 	const ray = $derived(P.skyRay(roof, scene.underground));
+
+	// One marker answers "is there a way out of here", and when the box
+	// arrives it does not simply turn green where it is: it travels to where
+	// the way out actually is. The concrete overhead has not moved.
+	const routed = new Tween(0, { duration: 800, easing: cubicInOut });
+	$effect(() => {
+		routed.target = scene.box ? 1 : 0;
+	});
+
+	const mark = $derived({
+		x: roof.x + (P.EXIT.x - roof.x) * routed.current,
+		y: P.SLAB_UNDER + (P.EXIT.y - P.SLAB_UNDER) * routed.current
+	});
+	/** Shown only once the car has actually arrived underneath. */
+	const markShown = $derived(!scene.cellular && roof.y > P.SLAB_UNDER);
 </script>
 
 <figure class="view">
@@ -127,13 +142,6 @@
 		{#if scene.box}
 			<!-- the box, and the wired link it forwards onto -->
 			<g class="box-group" in:fade={{ duration: 300, delay: 420 }} out:fade={{ duration: 160 }}>
-				<line
-					x1={P.BOX.x + P.BOX.w}
-					y1={P.BOX.y + P.BOX.h / 2}
-					x2={P.BACK_WALL.x0 + 4}
-					y2={P.BOX.y + P.BOX.h / 2}
-					class="cable"
-				/>
 				<rect x={P.BOX.x} y={P.BOX.y} width={P.BOX.w} height={P.BOX.h} rx="4" class="box" />
 				<circle cx={P.BOX.x + 10} cy={P.BOX.y + 9} r="2.6" class="led" />
 				<path
@@ -175,18 +183,46 @@
 
 		<!-- can the phone reach the tower from where it is? -->
 		{#if ray.show}
-		<g class="ray" class:blocked={!scene.cellular} in:fade={{ duration: 260 }}>
-			<line x1={roof.x} y1={roof.y} x2={ray.to.x} y2={ray.to.y} />
-			{#if ray.hit}
-				<g class="stop">
-					<circle cx={ray.to.x} cy={ray.to.y} r="10" />
+			<g class="ray" class:blocked={!scene.cellular} in:fade={{ duration: 260 }}>
+				<line x1={roof.x} y1={roof.y} x2={ray.to.x} y2={ray.to.y} />
+			</g>
+		{/if}
+
+		{#if scene.box}
+			<!-- the route the box opens: out of the car, through the box, up the
+			     cable into the house. Drawn so the marker has somewhere to go. -->
+			<g class="route">
+				<path
+					class="hop"
+					d="M {roof.x} {roof.y} L {P.BOX.x} {P.BOX.y + P.BOX.h / 2}"
+					in:draw={{ duration: 380, delay: 120 }}
+				/>
+				<path
+					class="riser"
+					d="M {P.EXIT.x} {P.BOX.y} L {P.EXIT.x} {P.EXIT.y}"
+					in:draw={{ duration: 480, delay: 320 }}
+				/>
+			</g>
+		{/if}
+
+		{#if markShown}
+			<!-- red cross at the concrete, green tick at the cable; the same
+			     marker, travelling between them -->
+			<g class="mark" class:open={scene.box} in:fade={{ duration: 240 }}>
+				<circle cx={mark.x} cy={mark.y} r="11" />
+				{#if routed.current < 0.5}
 					<path
-						d="M {ray.to.x - 4.5} {ray.to.y - 4.5} l 9 9 M {ray.to.x + 4.5} {ray.to.y -
-							4.5} l -9 9"
+						d="M {mark.x - 4.5} {mark.y - 4.5} l 9 9 M {mark.x + 4.5} {mark.y - 4.5} l -9 9"
 					/>
-				</g>
-			{/if}
-		</g>
+				{:else}
+					<path d="M {mark.x - 5} {mark.y} l 3.6 4.2 L {mark.x + 5.2} {mark.y - 5}" />
+				{/if}
+				{#if routed.current < 0.12}
+					<text x={mark.x + 17} y={mark.y - 8}>no path out</text>
+				{:else if routed.current > 0.88}
+					<text x={mark.x + 17} y={mark.y - 8} in:fade={{ duration: 280 }}>path out</text>
+				{/if}
+			</g>
 		{/if}
 
 		<!-- labels: few, and large enough to read -->
@@ -195,15 +231,13 @@
 			<text class="mid" x="688" y="100">cell tower</text>
 			{#if scene.box}
 				<g in:fade={{ duration: 300, delay: 480 }}>
-					<text class="mid" x={P.BOX.x + P.BOX.w / 2} y={P.BOX.y - 10}>Linux box</text>
+					<text class="mid" x={P.BOX.x + P.BOX.w / 2} y={P.BOX.y + P.BOX.h + 20}>
+						Linux box
+					</text>
 				</g>
 			{/if}
-			{#if ray.show}
-				{#if scene.cellular}
-					<text class="internet-text" x={ray.to.x + 10} y={ray.to.y - 6}>cellular</text>
-				{:else}
-					<text class="fail-text" x={ray.to.x + 16} y={ray.to.y - 4}>no path out</text>
-				{/if}
+			{#if ray.show && scene.cellular}
+				<text class="internet-text" x={ray.to.x + 10} y={ray.to.y - 6}>cellular</text>
 			{/if}
 		</g>
 	</svg>
@@ -338,16 +372,40 @@
 		stroke-dasharray: 5 4;
 		marker-end: none;
 	}
-	.stop circle {
+	.mark circle {
 		fill: var(--paper-raised);
 		stroke: var(--fail);
-		stroke-width: 2.2;
-	}
-	.stop path {
-		stroke: var(--fail);
 		stroke-width: 2.4;
+		transition: stroke 0.5s ease;
+	}
+	.mark path {
+		stroke: var(--fail);
+		stroke-width: 2.6;
 		stroke-linecap: round;
+		stroke-linejoin: round;
 		fill: none;
+		transition: stroke 0.5s ease;
+	}
+	.mark text {
+		font-family: var(--font);
+		font-size: 15px;
+		font-weight: 650;
+		fill: var(--fail);
+		transition: fill 0.5s ease;
+	}
+	.mark.open circle,
+	.mark.open path {
+		stroke: var(--ok);
+	}
+	.mark.open text {
+		fill: var(--ok);
+	}
+
+	.route path {
+		fill: none;
+		stroke: var(--ok);
+		stroke-width: 3.4;
+		stroke-linecap: round;
 	}
 
 	.label text {
@@ -366,10 +424,6 @@
 	}
 	.label .internet-text {
 		fill: var(--internet);
-		font-weight: 600;
-	}
-	.label .fail-text {
-		fill: var(--fail);
 		font-weight: 600;
 	}
 
@@ -398,8 +452,5 @@
 		stroke-width: 1.8;
 		fill: none;
 	}
-	.cable {
-		stroke: var(--link);
-		stroke-width: 2.6;
-	}
+
 </style>

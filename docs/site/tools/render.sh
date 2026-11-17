@@ -4,6 +4,10 @@
 # podman invocation. Writes to tools/out/.
 set -eu
 
+# Which variants to render. Default is the one the README ships; pass "a b"
+# to produce the alternative too.
+VARIANTS="${*:-b}"
+
 cd /work
 
 echo "== building the site =="
@@ -17,12 +21,12 @@ npm install --no-audit --no-fund
 rm -rf frames out
 mkdir -p out
 
-for v in a b; do
+for v in $VARIANTS; do
 	echo "== filming variant $v =="
 	node capture.mjs --variant "$v" --out "frames/$v"
 done
 
-for v in a b; do
+for v in $VARIANTS; do
 	echo "== encoding variant $v =="
 
 	# GIF: 256 colours is plenty for flat vector art, but a per-frame palette

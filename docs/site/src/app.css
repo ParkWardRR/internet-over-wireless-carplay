@@ -27,6 +27,7 @@
 	--link: #7c838e;
 
 	--fail: #b4322b;
+	--ok: #1d7a4c;
 
 	/* the building: context, drawn light so the car can be the subject */
 	--sky: #eaeff5;
@@ -60,6 +61,7 @@
 		--link: #7b838f;
 
 		--fail: #e8615a;
+		--ok: #4ec98a;
 
 		--sky: #1b222c;
 		--soil: #23262c;

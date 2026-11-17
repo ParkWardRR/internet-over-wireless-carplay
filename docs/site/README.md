@@ -20,16 +20,14 @@ nothing has to be installed on the host but podman.
     podman build -t carplay-render -f tools/Containerfile tools/
     podman run --rm -v "$PWD":/work:Z carplay-render sh /work/tools/render.sh
 
-That writes four files to `tools/out/`: two candidate variants, each as an
-animated WebP and a GIF.
+That writes `tools/out/hero-b.webp` and `tools/out/hero-b.gif`. Copy both to
+`docs/img/hero.webp` and `docs/img/hero.gif` — the README's `<picture>` offers
+the WebP first and falls back to the GIF, so both have to be there.
 
-- **a** — the page as it really is, light, with the state tabs visible.
-- **b** — diagram only, dark, with a caption bar. This is the one currently in
-  the README.
-
-Copy the pair you want into `docs/img/` and point the `<picture>` element in
-the top-level README at it. The element offers the WebP first and falls back
-to the GIF, so both files need to be present.
+Variant **b** is what ships: the diagram alone, dark, under a caption bar.
+There is a second variant **a** — the page as it really is, light, with the
+state tabs visible — kept because it is occasionally the better illustration.
+Render it with `render.sh a b`.
 
 ### Why it is filmed on a virtual clock
 
@@ -86,6 +84,14 @@ implying they are the same thing.
 off, because `prefers-reduced-motion` turns it off. Watch for keyframes that
 end at `opacity: 0`: with motion reduced the element never animates and simply
 disappears. The tower's coverage arcs have a resting opacity for that reason.
+
+**The route marker moves; it does not simply recolour.** Underground a red ✕
+sits against the slab, labelled *no path out*. When the box arrives the
+cellular path is still blocked — nothing has changed overhead — so the marker
+travels to where the way out actually is, turning green on the journey and
+arriving at the top of the box's uplink as *path out*. Recolouring it in place
+would have claimed the concrete had opened. Its label is hidden while it is in
+motion, so no text rides across the drawing.
 
 **Nothing is drawn mid-flight that would be wrong.** The car's "can it reach
 the tower" ray is hidden while the car is on the ramp — aimed at the tower

@@ -140,6 +140,14 @@ export const TOWER = { x: 712, base: GROUND_Y, tip: 118, feed: { x: 712, y: 140 
 export const BOX = { x: 568, y: 372, w: 56, h: 30 };
 
 /**
+ * Where the box's uplink leaves the picture: up the back of the garage,
+ * through the slab, into the house. The route marker moves here when the box
+ * arrives — the way out is not through the concrete overhead, it is sideways
+ * through the box and up the cable.
+ */
+export const EXIT = { x: BOX.x + BOX.w / 2, y: 276 };
+
+/**
  * The ray from the car's roof toward the tower. Above ground it is a short
  * directional stub; underground it stops dead at the underside of the slab,
  * which is the whole point of the picture.

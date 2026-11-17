@@ -1,10 +1,9 @@
 # internet-over-wireless-carplay
 
-<!-- Hero: rendered from docs/site. To switch candidates, swap -b for -a in
-     both paths below; to regenerate, see docs/site/README.md. -->
+<!-- Rendered from docs/site; see that directory's README to regenerate. -->
 <picture>
-  <source srcset="docs/img/hero-b.webp" type="image/webp">
-  <img src="docs/img/hero-b.gif" alt="A cutaway house with a basement garage. Above ground the phone has two links: blue to the car's head unit, amber to a cell tower. The car drives down into the garage and the cellular link dies while CarPlay keeps running. A Linux box then appears on the same car Wi-Fi and routes the phone out over the house's Ethernet." width="100%">
+  <source srcset="docs/img/hero.webp" type="image/webp">
+  <img src="docs/img/hero.gif" alt="A cutaway house with a basement garage, beside a diagram of what is connected to what. Above ground the phone has two links: blue to the car's head unit, amber to a cell tower. The car drives down into the garage and the cellular link dies — marked no path out — while CarPlay keeps running untouched. A Linux box then joins the same car Wi-Fi, a green route draws from the car through the box and up the house Ethernet, and the marker travels to it and turns green: path out." width="100%">
 </picture>
 
 [![Release](https://img.shields.io/github/v/release/ParkWardRR/internet-over-wireless-carplay?label=release&color=blue)](https://github.com/ParkWardRR/internet-over-wireless-carplay/releases)
