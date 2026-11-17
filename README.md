@@ -13,7 +13,7 @@
 [![iOS](https://img.shields.io/badge/iOS-27%2B-000000?logo=apple&logoColor=white)](https://developer.apple.com/ios/)
 [![BMW](https://img.shields.io/badge/BMW-NBT%20EVO-1C69D4?logo=bmw&logoColor=white)](https://www.bmw.com/)
 [![CarPlay](https://img.shields.io/badge/CarPlay-wireless-000000?logo=appleplay&logoColor=white)](https://www.apple.com/ios/carplay/)
-[![Status](https://img.shields.io/badge/status-one%20car%20proven%2C%20second%20pending-orange)](https://github.com/ParkWardRR/internet-over-wireless-carplay/blob/main/docs/status.md)
+[![Status](https://img.shields.io/badge/status-both%20cars%20proven-brightgreen)](https://github.com/ParkWardRR/internet-over-wireless-carplay/blob/main/docs/status.md)
 
 **Get internet on wireless CarPlay in a garage with no cell signal.**
 

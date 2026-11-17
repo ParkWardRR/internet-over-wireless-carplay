@@ -128,15 +128,18 @@
 				beacon and behave differently by design.
 			</p>
 			<p>
-				The coverage is uneven even within that. The airtime and shaping figures come from one
-				car on single evenings. The full path — phone validated, traffic forwarded — is well
-				established on one of the two cars and has been seen on the other only briefly.
+				<strong>Both cars are proven.</strong> Each has been served on the current build, and
+				on each, iOS validated the link — meaning apps could actually use it, not just
+				background services. The evidence behind that is lopsided, though: one car validated
+				eleven times across three days, the other once, and the airtime and shaping figures
+				come from a single car on single evenings. <span class="tag">measured</span>
 			</p>
 			<p>
-				Still unresolved: whether a phone has ever genuinely used the NAT64 translator (it is
-				running and resolving names, but its tunnel has carried almost nothing); both phones
-				validated at the same time; and how quickly the phone returns to cellular when driving
-				out.
+				Still unresolved: both phones validated <em>at the same time</em> — in the window
+				where both cars were served, neither phone validated, so only background traffic
+				moved; whether a phone has ever genuinely used the NAT64 translator, which is running
+				and resolving names but whose tunnel has carried almost nothing; a long session on
+				the second car; and how quickly the phone returns to cellular when driving out.
 			</p>
 			<p class="more">
 				<a href={`${WIKI}/Open-Questions`}>Open questions →</a>
