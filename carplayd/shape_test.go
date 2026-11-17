@@ -30,15 +30,101 @@ func TestApplyShapingBuildsTheHTBChain(t *testing.T) {
 	want := []string{
 		"tc qdisc del dev carb root",
 		"tc qdisc add dev carb root handle 1: htb default 10",
-		"tc class add dev carb parent 1: classid 1:10 htb rate 2mbit ceil 2mbit",
+		"tc class add dev carb parent 1: classid 1:1 htb rate 2000kbit ceil 2000kbit",
+		"tc class add dev carb parent 1:1 classid 1:10 htb rate 1750kbit ceil 2000kbit prio 1",
+		"tc class add dev carb parent 1:1 classid 1:20 htb rate 250kbit ceil 2000kbit prio 0",
 		"tc qdisc add dev carb parent 1:10 handle 10: pfifo limit 16",
+		"tc qdisc add dev carb parent 1:20 handle 20: pfifo limit 64",
+		"tc filter add dev carb parent 1: protocol ipv6 prio 1 u32 match u8 58 0xff at 6 flowid 1:20",
 	}
 	if len(r.calls) != len(want) {
-		t.Fatalf("ran %d commands, want %d: %v", len(r.calls), len(want), r.calls)
+		t.Fatalf("ran %d commands, want %d:\n%v", len(r.calls), len(want), r.calls)
 	}
 	for i, w := range want {
 		if got := r.line(i); got != w {
 			t.Errorf("step %d:\n got %q\nwant %q", i, got, w)
+		}
+	}
+}
+
+// The defect this fixes: RAs failed to send under load because the short bulk
+// queue was full of a download. ICMPv6 must land in a strict-priority class
+// with a guaranteed rate, and the filter must be installed.
+func TestICMPv6GetsStrictPriority(t *testing.T) {
+	r := &recorder{}
+	if err := applyShaping("carb", "2mbit", r.run); err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(func() []string {
+		var o []string
+		for i := range r.calls {
+			o = append(o, r.line(i))
+		}
+		return o
+	}(), "\n")
+
+	if !strings.Contains(all, `classid 1:20`) || !strings.Contains(all, "prio 0") {
+		t.Fatal("no priority class:\n" + all)
+	}
+	// prio 0 beats prio 1 in HTB, so control must be 0 and bulk 1.
+	ctrl := strings.Index(all, "classid 1:20")
+	if !strings.Contains(all[ctrl:], "prio 0") {
+		t.Error("the control class is not prio 0")
+	}
+	bulk := strings.Index(all, "classid 1:10")
+	if !strings.Contains(all[bulk:ctrl], "prio 1") {
+		t.Error("the bulk class is not prio 1")
+	}
+	// next header 58 = ICMPv6, at offset 6 of the IPv6 header
+	if !strings.Contains(all, "u32 match u8 58 0xff at 6 flowid 1:20") {
+		t.Error("no ICMPv6 filter into the control class")
+	}
+	// The control queue must be deeper than bulk: a burst of neighbour
+	// solicitations must not be able to drop an RA.
+	if ctrlLeafPackets <= shapeLeafPackets {
+		t.Errorf("control leaf %d should exceed bulk leaf %d", ctrlLeafPackets, shapeLeafPackets)
+	}
+}
+
+func TestControlSliceScalesWithTheCapButHasAFloor(t *testing.T) {
+	for _, tc := range []struct {
+		rate     string
+		wantCtrl int
+	}{
+		{"8mbit", 1000}, // total/8
+		{"2mbit", 250},
+		{"1mbit", 128}, // total/8 = 125, floored to 128
+		{"512kbit", 128},
+	} {
+		r := &recorder{}
+		if err := applyShaping("carb", tc.rate, r.run); err != nil {
+			t.Fatalf("%s: %v", tc.rate, err)
+		}
+		want := "classid 1:20 htb rate " + kbitToTC(tc.wantCtrl)
+		found := false
+		for i := range r.calls {
+			if strings.Contains(r.line(i), want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: want %q, got %v", tc.rate, want, r.calls)
+		}
+	}
+}
+
+// A cap at or below the control floor must still produce a valid chain: HTB
+// rejects a zero-rate class, so bulk gets a token slice rather than nothing.
+func TestVerySmallCapStillBuildsAValidChain(t *testing.T) {
+	for _, rate := range []string{"128kbit", "64kbit", "1kbit"} {
+		r := &recorder{}
+		if err := applyShaping("carb", rate, r.run); err != nil {
+			t.Fatalf("%s: %v", rate, err)
+		}
+		for i := range r.calls {
+			if strings.Contains(r.line(i), "rate 0kbit") {
+				t.Errorf("%s: produced a zero-rate class: %s", rate, r.line(i))
+			}
 		}
 	}
 }

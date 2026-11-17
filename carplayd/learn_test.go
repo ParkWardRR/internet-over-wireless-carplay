@@ -186,9 +186,10 @@ func TestProfilesPersistAndTolerateGarbage(t *testing.T) {
 // departure. Asserting on d.learned() alone would not have caught it -- that
 // function was never broken; its caller simply did not exist.
 func TestLearnedThresholdsReachTheLeaveDecision(t *testing.T) {
-	// A link that lives around -60 dBm, configured for a far weaker one. Drop
-	// and FailRate are off so only the absolute threshold can fire.
-	configured := Car{ID: "A", Join: -80, Leave: -85, Rejoin: -77}
+	// A link that lives around -85 dBm, configured as if it were far stronger,
+	// so learning has to make the leave MORE patient than the configuration.
+	// Drop and FailRate are off so only the absolute threshold can fire.
+	configured := Car{ID: "A", Join: -80, Leave: -70, Rejoin: -77}
 	cfg := defaultConfig()
 	cfg.Learn = true
 	cfg.LeaveFor = 2 * time.Second
@@ -197,18 +198,29 @@ func TestLearnedThresholdsReachTheLeaveDecision(t *testing.T) {
 	d := &daemon{cfg: cfg, serving: &configured, prof: newProfiles(""), m: newMetrics()}
 	rng := rand.New(rand.NewSource(11))
 	for i := 0; i < 600; i++ {
-		d.prof.Observe("A", int(-60+rng.NormFloat64()*2), 0, true)
+		d.prof.Observe("A", int(-85+rng.NormFloat64()*2), 0, true)
 	}
 
 	sc := d.learned(configured)
-	if sc.Leave <= configured.Leave {
-		t.Fatalf("learned leave %d did not move above the configured %d for a -60 dBm link; "+
+	// INVERTED 2026-11-16. This used to prove the learned leave reaches the
+	// decision by making it MORE eager than configured and showing the box
+	// left. A learned leave can no longer be more eager -- see
+	// TestLearnedLeaveNeverMoreEagerThanConfigured and derive() -- because the
+	// F32 parked at -51 dBm, learned a leave near -60 against a configured
+	// -85, and abandoned a car it had served happily.
+	//
+	// The intent still holds and is still worth proving: the learned number,
+	// not the configured one, has to reach decideLeave. So the lever is now
+	// patience instead of eagerness. The configured leave here is deliberately
+	// too eager for a link that actually lives at -85, and the test shows the
+	// box STAYS at a signal the configuration alone would have left on.
+	if sc.Leave >= configured.Leave {
+		t.Fatalf("learned leave %d did not move below the configured %d for an -85 dBm link; "+
 			"the rest of this test proves nothing", sc.Leave, configured.Leave)
 	}
-	// Pick a signal strictly between the two thresholds, so the two answers
-	// cannot be confused: weak for this link, fine by the configuration.
+	// A signal that is fine for this link but under the configured threshold.
 	sig := (sc.Leave + configured.Leave) / 2
-	if !(sig < sc.Leave && sig > configured.Leave) {
+	if !(sig > sc.Leave && sig < configured.Leave) {
 		t.Fatalf("test setup: %d does not sit between learned %d and configured %d",
 			sig, sc.Leave, configured.Leave)
 	}
@@ -218,9 +230,9 @@ func TestLearnedThresholdsReachTheLeaveDecision(t *testing.T) {
 	for i := 0; i < 10 && why == ""; i++ {
 		why = d.decideLeave(sig, start.Add(time.Duration(i)*time.Second)).why
 	}
-	if why == "" {
-		t.Errorf("at %d dBm the box stayed put: learned leave is %d, so the decision is still "+
-			"using the configured %d", sig, sc.Leave, configured.Leave)
+	if why != "" {
+		t.Errorf("at %d dBm the box left (%q): learned leave is %d, so the decision is still "+
+			"using the configured %d", sig, why, sc.Leave, configured.Leave)
 	}
 
 	// The pick path and the leave path must agree on the same car, or a box can
@@ -229,15 +241,72 @@ func TestLearnedThresholdsReachTheLeaveDecision(t *testing.T) {
 		t.Errorf("join path sees %+v but leave path sees %+v", pickSide, sc)
 	}
 
-	// With learning off, the same signal is fine again and nothing is substituted.
+	// With learning off nothing is substituted -- and the same signal now ends
+	// the session, because the configured threshold is the eager one. That
+	// contrast is the proof: the only difference between staying and leaving at
+	// this signal is whether the learned number reached the decision.
 	d.cfg.Learn = false
 	if off := d.learned(configured); off != configured {
 		t.Fatalf("learn=off still substituted: %+v", off)
 	}
 	d.below, d.belowTrend, d.belowFail = time.Time{}, time.Time{}, time.Time{}
-	for i := 0; i < 10; i++ {
-		if w := d.decideLeave(sig, start.Add(time.Duration(20+i)*time.Second)).why; w != "" {
-			t.Errorf("learn=off left at %d dBm with a -85 configured threshold: %s", sig, w)
-		}
+	var offWhy string
+	for i := 0; i < 10 && offWhy == ""; i++ {
+		offWhy = d.decideLeave(sig, start.Add(time.Duration(20+i)*time.Second)).why
+	}
+	if offWhy == "" {
+		t.Errorf("learn=off stayed at %d dBm despite the configured leave being %d; "+
+			"then the learned value proved nothing", sig, configured.Leave)
+	}
+}
+
+// The F32 flap, 2026-11-16. It parked far closer than it ever had, its healthy
+// mean learned to -51.1 dBm, and the derived leave went to roughly -60 against
+// a configured -85 -- so the box gave up on a car at a signal it had served
+// happily. A learned leave may hold on longer than configured; it may never
+// give up sooner.
+func TestLearnedLeaveNeverMoreEagerThanConfigured(t *testing.T) {
+	cfg := Car{ID: "A", Join: -80, Leave: -85, Rejoin: -77, FailRate: 5}
+	for _, tc := range []struct {
+		name       string
+		mean, vari float64
+	}{
+		{"the real F32 numbers", -51.1, 8.4},
+		{"parked very close", -40, 4},
+		{"parked normally", -70, 12},
+		{"zero variance", -55, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ps := newProfiles("")
+			p := ps.get("A")
+			p.Healthy = ewma{Mean: tc.mean, Var: tc.vari, N: 500}
+			p.Quiet = ewma{Mean: 0.5, Var: 0.2, N: 500}
+			got, ok := ps.Derive(cfg)
+			if !ok {
+				t.Fatal("profile should be ready with n=500")
+			}
+			if got.Leave > cfg.Leave {
+				t.Errorf("derived leave %d is more eager than the configured %d", got.Leave, cfg.Leave)
+			}
+			// and the hysteresis invariant must still hold
+			if !(got.Leave < got.Join && got.Join <= got.Rejoin) {
+				t.Errorf("hysteresis broken: leave=%d join=%d rejoin=%d", got.Leave, got.Join, got.Rejoin)
+			}
+		})
+	}
+}
+
+// The clamp must not stop learning from being MORE patient than configured --
+// that direction is the point of learning on a link where parked and dying
+// signal overlap.
+func TestLearnedLeaveMayStillBeMorePatient(t *testing.T) {
+	cfg := Car{ID: "A", Join: -80, Leave: -70, Rejoin: -77, FailRate: 5}
+	ps := newProfiles("")
+	p := ps.get("A")
+	p.Healthy = ewma{Mean: -78, Var: 9, N: 500}
+	p.Quiet = ewma{Mean: 0.5, Var: 0.2, N: 500}
+	got, _ := ps.Derive(cfg)
+	if got.Leave >= cfg.Leave {
+		t.Fatalf("a car that lives at -78 should learn a leave below the configured -70, got %d", got.Leave)
 	}
 }

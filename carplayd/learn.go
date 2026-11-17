@@ -176,6 +176,24 @@ func (p *profile) derive(c Car) (Car, bool) {
 		out.FailRate = q
 	}
 
+	// A learned leave may hold on LONGER than configured, never give up
+	// sooner. The configured value is the outer bound, and this is the
+	// direction that was missing.
+	//
+	// Measured 2026-11-16: the F32 parked far closer than it ever had, so its
+	// healthy mean learned to -51.1 dBm with sd 2.9. m - 3*sd put the derived
+	// leave near -60 against a configured -85, so an ordinary dip made the box
+	// abandon a car it had been serving happily. It reconnected and did it
+	// again -- two leaves in 30 s, logged at -71 and -70, which is the signal
+	// as it fell through the threshold rather than the threshold itself.
+	//
+	// On this link RSSI does not even tell parked from dead; that is what the
+	// failure-rate rule is for, and why leave is only a guard. A guard that
+	// fires 25 dB early is worse than no guard.
+	if out.Leave > c.Leave {
+		out.Leave = c.Leave
+	}
+
 	// The hysteresis invariant the config parser enforces must survive
 	// learning: minDBm <= leave < join <= rejoin. Clamping first and adjusting
 	// afterwards is what let a derived leave slip to -96.

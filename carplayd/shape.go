@@ -40,6 +40,27 @@ import (
 // retransmits, shallow enough that CarPlay audio behind it still has a chance.
 const shapeLeafPackets = 16
 
+// ctrlLeafPackets / ctrlFloorKbit size the priority class that carries ICMPv6.
+//
+// WHY THIS CLASS EXISTS. Measured 2026-11-16 on both cars under load:
+//
+//	carplayd_error A ra_send write ip ::->ff02::1: sendmsg: no buffer space available
+//
+// Router advertisements were failing to send. The 16-packet bulk queue above is
+// deliberately short, and under saturation it is full of somebody's download --
+// so the RAs that keep the phone's default route alive could not get out. The
+// cap meant to protect the link was starving the thing that makes the link
+// work, and tightening the cap (which rate = auto does) makes it worse.
+//
+// So ICMPv6 gets its own strict-priority class with a guaranteed slice. It is
+// tiny traffic: an RA every 3-4 s, neighbour discovery, and the occasional
+// ping. A deeper queue than bulk costs nothing at this volume and means a burst
+// of neighbour solicitations cannot drop an RA either.
+const (
+	ctrlLeafPackets = 64
+	ctrlFloorKbit   = 128
+)
+
 // applyShaping installs an HTB rate cap on a car link's egress. rate is a tc
 // rate string ("2mbit"); empty means no shaping, which is the default so that
 // an unmeasured car or a different head unit is not silently throttled.
@@ -51,18 +72,51 @@ func applyShaping(sta, rate string, runner func(string, ...string) error) error 
 	if rate == "" {
 		return nil
 	}
+	total, err := parseRateKbit(rate)
+	if err != nil {
+		return fmt.Errorf("shaping %s: %w", sta, err)
+	}
+	// Below 2 kbit there is nothing to split: HTB rejects a zero-rate class,
+	// and a cap that small is pathological anyway. Fall back to one class.
+	split := total >= 2
+	ctrl := total / 8
+	if ctrl < ctrlFloorKbit {
+		ctrl = ctrlFloorKbit
+	}
+	if ctrl > total-1 {
+		ctrl = total - 1
+	}
+	bulk := total - ctrl
+	if !split {
+		ctrl, bulk = 0, total
+	}
+
 	// Not an error: there may be no qdisc yet.
 	_ = runner("tc", "qdisc", "del", "dev", sta, "root")
-	if err := runner("tc", "qdisc", "add", "dev", sta, "root", "handle", "1:", "htb", "default", "10"); err != nil {
-		return fmt.Errorf("htb root on %s: %w", sta, err)
+	steps := [][]string{
+		{"tc", "qdisc", "add", "dev", sta, "root", "handle", "1:", "htb", "default", "10"},
+		// One parent so the two children can borrow from each other: control
+		// traffic is bursty and tiny, and bulk should get the rest when it is
+		// idle rather than being permanently short.
+		{"tc", "class", "add", "dev", sta, "parent", "1:", "classid", "1:1", "htb", "rate", kbitToTC(total), "ceil", kbitToTC(total)},
+		{"tc", "class", "add", "dev", sta, "parent", "1:1", "classid", "1:10", "htb", "rate", kbitToTC(bulk), "ceil", kbitToTC(total), "prio", "1"},
+		{"tc", "qdisc", "add", "dev", sta, "parent", "1:10", "handle", "10:", "pfifo", "limit", fmt.Sprint(shapeLeafPackets)},
 	}
-	if err := runner("tc", "class", "add", "dev", sta, "parent", "1:", "classid", "1:10",
-		"htb", "rate", rate, "ceil", rate); err != nil {
-		return fmt.Errorf("htb class %s on %s: %w", rate, sta, err)
+	if split {
+		steps = append(steps[:3],
+			[]string{"tc", "class", "add", "dev", sta, "parent", "1:1", "classid", "1:20", "htb", "rate", kbitToTC(ctrl), "ceil", kbitToTC(total), "prio", "0"},
+			[]string{"tc", "qdisc", "add", "dev", sta, "parent", "1:10", "handle", "10:", "pfifo", "limit", fmt.Sprint(shapeLeafPackets)},
+			[]string{"tc", "qdisc", "add", "dev", sta, "parent", "1:20", "handle", "20:", "pfifo", "limit", fmt.Sprint(ctrlLeafPackets)},
+			// ICMPv6 (next header 58, at offset 6 of the IPv6 header) into the
+			// priority class. Router advertisements are ICMPv6, and they are
+			// what keeps the phone's default route alive.
+			[]string{"tc", "filter", "add", "dev", sta, "parent", "1:", "protocol", "ipv6", "prio", "1", "u32", "match", "u8", "58", "0xff", "at", "6", "flowid", "1:20"},
+		)
 	}
-	if err := runner("tc", "qdisc", "add", "dev", sta, "parent", "1:10", "handle", "10:",
-		"pfifo", "limit", fmt.Sprint(shapeLeafPackets)); err != nil {
-		return fmt.Errorf("pfifo leaf on %s: %w", sta, err)
+	for _, st := range steps {
+		if err := runner(st[0], st[1:]...); err != nil {
+			return fmt.Errorf("%s on %s: %w", strings.Join(st[1:4], " "), sta, err)
+		}
 	}
 	return nil
 }
