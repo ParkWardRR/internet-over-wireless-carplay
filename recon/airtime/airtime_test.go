@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/binary"
 	"math"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -307,4 +309,74 @@ func TestPercentile(t *testing.T) {
 	if got := pctl(nil, .5); got != 0 {
 		t.Errorf("empty -> %v", got)
 	}
+}
+
+// A file written by the old binary has the wrong role in every second. The
+// report must recompute rather than inherit it, or the one real dataset this
+// project has stays mis-analysed.
+func TestReportRederivesRoleFromStoredBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/run.jsonl"
+	// Exactly the shape of the bug: a phone stored as "other", every byte of
+	// its traffic addressed to a head unit.
+	line := `{"t":"2026-11-17T05:30:00Z","frames":100,"bytes":650000,"air_us":442000,` +
+		`"busy_pct":44.2,"bad_fcs":0,"unaccounted":0,"best_mbps":65,"headroom_mbps":36,` +
+		`"stations":{` +
+		`"d2:af:8e:31:1e:7d":{"frames":80,"retries":3,"bytes":650000,"air_us":442000,` +
+		`"unaccounted":0,"sig":-36,"max_mbps":65,"min_mbps":52,"role":"other","to_hu_bytes":649900,"to_hu_air_us":441000},` +
+		`"8c:57:9b:8c:e8:64":{"frames":20,"retries":0,"bytes":14000,"air_us":106000,` +
+		`"unaccounted":0,"sig":-44,"max_mbps":65,"min_mbps":1,"role":"hu","to_hu_bytes":0,"to_hu_air_us":0}}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	if err := reportFile(path, &b); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "CarPlay active 1 s") {
+		t.Errorf("the second was not recognised as CarPlay-active:\n%s", out)
+	}
+	// The phone must now be labelled phone, and its airtime must land in
+	// CarPlay's cost rather than vanishing into "other".
+	if !strings.Contains(out, "phone") {
+		t.Errorf("no station classified as phone:\n%s", out)
+	}
+	if strings.Contains(out, "No CarPlay-active seconds") {
+		t.Errorf("still mis-analysed:\n%s", out)
+	}
+}
+
+// One level up from the first-frame bug: the per-station summary took Role
+// from whichever second came last, so a single quiet second in which the phone
+// sent little relabelled it "other" in the table -- even after the per-second
+// classification was fixed. The role must come from the totals.
+func TestAggregateRoleComesFromTotalsNotTheLastSecond(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/run.jsonl"
+	busy := `{"t":"2026-11-17T05:30:00Z","frames":80,"bytes":650000,"air_us":442000,"busy_pct":44.2,` +
+		`"best_mbps":65,"stations":{"d2:af:8e:31:1e:7d":{"frames":80,"bytes":650000,"air_us":442000,` +
+		`"sig":-36,"role":"other","to_hu_bytes":649900}}}`
+	// A quiet second: a few bytes, none of them to a head unit.
+	quiet := `{"t":"2026-11-17T05:30:01Z","frames":2,"bytes":200,"air_us":600,"busy_pct":0.1,` +
+		`"best_mbps":65,"stations":{"d2:af:8e:31:1e:7d":{"frames":2,"bytes":200,"air_us":600,` +
+		`"sig":-36,"role":"other","to_hu_bytes":0}}}`
+	if err := os.WriteFile(path, []byte(busy+"\n"+quiet+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	if err := reportFile(path, &b); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	// 649900 of 650200 bytes went to a head unit: overwhelmingly a phone.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "d2:af:8e:31:1e:7d") {
+			if !strings.Contains(line, "phone") {
+				t.Fatalf("summary mislabels the phone from the last second:\n%s", line)
+			}
+			return
+		}
+	}
+	t.Fatalf("station missing from the summary:\n%s", out)
 }

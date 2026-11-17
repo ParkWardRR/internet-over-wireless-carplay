@@ -73,6 +73,31 @@ func reportFile(path string, w io.Writer) error {
 		return fmt.Errorf("%s: no usable seconds", path)
 	}
 
+	// Re-derive phone-vs-other from the data rather than trusting the stored
+	// label.
+	//
+	// The capture-time fix only helps future runs: a file written by the old
+	// binary has the wrong role baked into every second, and the one real
+	// dataset this project has -- the 2026-11-16 drive -- is such a file. The
+	// bytes needed to decide are right there in it, so the report recomputes
+	// instead of inheriting a known-bad answer.
+	//
+	// "hu" and "box" are kept as stored: those come from a direct MAC match
+	// against the configured lists and were never order-dependent. Only
+	// phone-vs-other was.
+	for _, s := range secs {
+		for _, st := range s.Stations {
+			if st.Role == "hu" || st.Role == "box" {
+				continue
+			}
+			if st.Bytes > 0 && float64(st.ToHU)/float64(st.Bytes) > 0.5 {
+				st.Role = "phone"
+			} else {
+				st.Role = "other"
+			}
+		}
+	}
+
 	// A second counts as CarPlay-active if any station classified as a phone
 	// actually spent airtime in it. That is the behaviour-based role, so it no
 	// longer depends on which frame arrived first.
@@ -164,7 +189,14 @@ func reportFile(path string, w io.Writer) error {
 				a = &agg{MAC: m}
 				tot[m] = a
 			}
-			a.Role = st.Role
+			// NOT a.Role = st.Role: that takes the label from whichever
+			// second happens to come last, so one quiet second in which a
+			// phone sent little relabels the whole station. The role is
+			// derived from the totals below, after everything is summed --
+			// the same mistake as classifying on the first frame, one level up.
+			if st.Role == "hu" || st.Role == "box" {
+				a.Role = st.Role
+			}
 			a.AirUS += st.AirUS
 			a.Bytes += st.Bytes
 			a.Frames += st.Frames
@@ -177,6 +209,13 @@ func reportFile(path string, w io.Writer) error {
 	}
 	list := make([]*agg, 0, len(tot))
 	for _, a := range tot {
+		if a.Role == "" {
+			if a.Bytes > 0 && float64(a.ToHU)/float64(a.Bytes) > 0.5 {
+				a.Role = "phone"
+			} else {
+				a.Role = "other"
+			}
+		}
 		list = append(list, a)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].AirUS > list[j].AirUS })
