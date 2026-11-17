@@ -378,8 +378,70 @@ func (r *recon) prune(capDir string, maxBytes int64, keepAround time.Duration) {
 // 0700 output directory. The ring died one rotation in ("Permission denied")
 // while the live parser, which only writes to a pipe, kept running — so the
 // events log looked healthy with no capture behind it.
+// ringBackoff grows the retry delay while the capture device is absent, and
+// ringGoneAfter is how many consecutive absences count as "unplugged".
+//
+// The retry loop below must keep trying: watchStall recovers a deaf AR9271 by
+// dropping the interface so this loop rebuilds it, so a few seconds of absence
+// is normal and expected. What is not normal is the device never coming back.
+//
+// Measured 2026-11-16: the monitor dongle was unplugged to move it to the
+// in-car recorder, and this loop respawned tcpdump every 2 s for three hours,
+// writing two identical log lines each time -- thousands of them -- while
+// recording nothing. A capture that is dead should say so once and wait
+// quietly, not shout the same thing 5400 times.
+// Vars, not consts, so a test can shrink the waits: proving the escalation
+// takes ten backoff periods, which is minutes at the real values.
+var (
+	ringBackoffMin = 2 * time.Second
+	ringBackoffMax = 30 * time.Second
+	ringGoneAfter  = 10 // consecutive absences before calling it unplugged
+)
+
+// ifacePresent reports whether the capture device still exists. Replaceable in
+// tests.
+var ifacePresent = func(dev string) bool {
+	_, err := os.Stat("/sys/class/net/" + dev)
+	return err == nil
+}
+
 func (r *recon) ring(dev, capDir string, rotate time.Duration, stop <-chan struct{}) {
+	backoff := ringBackoffMin
+	absent := 0
+	goneLogged := false
 	for {
+		// Before spending a process on it: is the device even there?
+		if !ifacePresent(dev) {
+			absent++
+			switch {
+			case absent == 1:
+				// Expected during stall recovery, so say it once and quietly.
+				r.event("device_missing", "dev="+dev, "waiting for it to come back")
+			case absent == ringGoneAfter:
+				r.event("device_gone", "dev="+dev,
+					fmt.Sprintf("absent for %d checks -- adapter unplugged? still waiting, quietly", absent),
+					"note=nothing is being recorded")
+				goneLogged = true
+			}
+			if backoff < ringBackoffMax {
+				backoff *= 2
+				if backoff > ringBackoffMax {
+					backoff = ringBackoffMax
+				}
+			}
+			select {
+			case <-stop:
+				return
+			case <-time.After(backoff):
+			}
+			continue
+		}
+		if absent > 0 {
+			if goneLogged {
+				r.event("device_back", "dev="+dev, fmt.Sprintf("after %d absent checks", absent))
+			}
+			absent, backoff, goneLogged = 0, ringBackoffMin, false
+		}
 		// -B 16384: a 16 MB kernel capture buffer. Channel 11 here runs ~500
 		// frames/s with bursts well above that, and anything that overflows
 		// the default buffer is counted as "dropped by kernel" and lost.
@@ -406,7 +468,7 @@ func (r *recon) ring(dev, capDir string, rotate time.Duration, stop <-chan struc
 		select {
 		case <-stop:
 			return
-		case <-time.After(2 * time.Second):
+		case <-time.After(ringBackoffMin):
 		}
 	}
 }

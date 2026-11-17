@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -171,4 +172,113 @@ func TestSnapLengthUsesOrigLen(t *testing.T) {
 	if !ok || f.length != len(full)-11 {
 		t.Fatalf("length %d, want %d", f.length, len(full)-11)
 	}
+}
+
+// The capture loop must tell a stall from an unplug.
+//
+// Measured 2026-11-16: the monitor dongle was moved to the in-car recorder and
+// this loop respawned tcpdump every 2 s for three hours, logging two identical
+// lines each time while recording nothing. It must keep retrying -- watchStall
+// recovers a deaf AR9271 by dropping the interface so this loop rebuilds it --
+// but it must back off and say so once, not shout 5400 times.
+func TestRingBacksOffAndNamesAnUnpluggedAdapter(t *testing.T) {
+	defer swapRingTimings(t, time.Millisecond, 4*time.Millisecond, 4)()
+	present := false
+	oldPresent := ifacePresent
+	ifacePresent = func(string) bool { return present }
+	t.Cleanup(func() { ifacePresent = oldPresent })
+
+	evf, err := os.CreateTemp(t.TempDir(), "ev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &recon{ev: evf}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() { r.ring("mon0", t.TempDir(), time.Minute, stop); close(done) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b, _ := os.ReadFile(evf.Name())
+		if strings.Contains(string(b), "device_gone") {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(stop)
+	<-done
+
+	b, _ := os.ReadFile(evf.Name())
+	log := string(b)
+	if !strings.Contains(log, "device_missing") {
+		t.Fatalf("no device_missing event:\n%s", log)
+	}
+	if !strings.Contains(log, "device_gone") {
+		t.Fatalf("never escalated to device_gone:\n%s", log)
+	}
+	// It must not have tried to start a capture with no device.
+	if strings.Contains(log, "ring_start") {
+		t.Errorf("started a capture with no device present:\n%s", log)
+	}
+	// Each state is announced once, not once per retry -- that is the defect.
+	for _, name := range []string{"device_missing", "device_gone"} {
+		if n := strings.Count(log, name); n != 1 {
+			t.Errorf("%s logged %d times, want exactly 1:\n%s", name, n, log)
+		}
+	}
+}
+
+// A stall-recovery cycle: the interface vanishes briefly, then returns. The
+// loop must go back to its normal interval and re-announce recovery, rather
+// than staying on the long backoff it had climbed to.
+func TestRingRecoversWhenTheDeviceComesBack(t *testing.T) {
+	defer swapRingTimings(t, time.Millisecond, 4*time.Millisecond, 3)()
+	var mu sync.Mutex
+	present := false
+	oldPresent := ifacePresent
+	ifacePresent = func(string) bool { mu.Lock(); defer mu.Unlock(); return present }
+	t.Cleanup(func() { ifacePresent = oldPresent })
+
+	evf, _ := os.CreateTemp(t.TempDir(), "ev")
+	r := &recon{ev: evf}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() { r.ring("mon0", t.TempDir(), time.Minute, stop); close(done) }()
+
+	// wait for the gone escalation, then plug it back in
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b, _ := os.ReadFile(evf.Name())
+		if strings.Contains(string(b), "device_gone") {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	present = true
+	mu.Unlock()
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b, _ := os.ReadFile(evf.Name())
+		if strings.Contains(string(b), "device_back") {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(stop)
+	<-done
+
+	b, _ := os.ReadFile(evf.Name())
+	if !strings.Contains(string(b), "device_back") {
+		t.Fatalf("no device_back after the interface returned:\n%s", b)
+	}
+}
+
+func swapRingTimings(t *testing.T, mn, mx time.Duration, gone int) func() {
+	t.Helper()
+	om, ox, og := ringBackoffMin, ringBackoffMax, ringGoneAfter
+	ringBackoffMin, ringBackoffMax, ringGoneAfter = mn, mx, gone
+	return func() { ringBackoffMin, ringBackoffMax, ringGoneAfter = om, ox, og }
 }
