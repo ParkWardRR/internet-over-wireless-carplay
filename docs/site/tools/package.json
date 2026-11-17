@@ -1,0 +1,9 @@
+{
+  "name": "carplay-hero-render",
+  "private": true,
+  "type": "module",
+  "description": "Renders the explainer's three states into the README hero animation.",
+  "dependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

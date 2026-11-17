@@ -174,7 +174,8 @@
 		</g>
 
 		<!-- can the phone reach the tower from where it is? -->
-		<g class="ray" class:blocked={!scene.cellular}>
+		{#if ray.show}
+		<g class="ray" class:blocked={!scene.cellular} in:fade={{ duration: 260 }}>
 			<line x1={roof.x} y1={roof.y} x2={ray.to.x} y2={ray.to.y} />
 			{#if ray.hit}
 				<g class="stop">
@@ -186,6 +187,7 @@
 				</g>
 			{/if}
 		</g>
+		{/if}
 
 		<!-- labels: few, and large enough to read -->
 		<g class="label">
@@ -196,10 +198,12 @@
 					<text class="mid" x={P.BOX.x + P.BOX.w / 2} y={P.BOX.y - 10}>Linux box</text>
 				</g>
 			{/if}
-			{#if scene.cellular}
-				<text class="internet-text" x={ray.to.x + 10} y={ray.to.y - 6}>cellular</text>
-			{:else}
-				<text class="fail-text" x={ray.to.x + 16} y={ray.to.y - 4}>no path out</text>
+			{#if ray.show}
+				{#if scene.cellular}
+					<text class="internet-text" x={ray.to.x + 10} y={ray.to.y - 6}>cellular</text>
+				{:else}
+					<text class="fail-text" x={ray.to.x + 16} y={ray.to.y - 4}>no path out</text>
+				{/if}
 			{/if}
 		</g>
 	</svg>

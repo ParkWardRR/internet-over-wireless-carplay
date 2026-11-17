@@ -144,18 +144,33 @@ export const BOX = { x: 568, y: 372, w: 56, h: 30 };
  * directional stub; underground it stops dead at the underside of the slab,
  * which is the whole point of the picture.
  */
-export function skyRay(roof: Pt, blocked: boolean): { to: Pt; hit: boolean } {
-	// Blocked, the ray goes straight up: what stops it is the slab directly
-	// overhead, and a vertical stub keeps clear of everything else in the
-	// garage. Unblocked, it points at the tower, which is the thing it reaches.
-	if (blocked && roof.y > SLAB_UNDER) {
-		return { to: { x: roof.x, y: SLAB_UNDER }, hit: true };
+export function skyRay(
+	roof: Pt,
+	blocked: boolean
+): { to: Pt; hit: boolean; show: boolean } {
+	if (blocked) {
+		// Straight up: what stops it is the slab directly overhead, and a
+		// vertical stub keeps clear of everything else in the garage. While the
+		// car is still on the ramp there is nothing meaningful to draw — a ray
+		// aimed at the tower from halfway down would sweep across the house —
+		// so it stays hidden until the car has actually arrived underneath.
+		return {
+			to: { x: roof.x, y: SLAB_UNDER },
+			hit: true,
+			show: roof.y > SLAB_UNDER
+		};
 	}
+	// Unblocked, it points at the tower, which is the thing it reaches. Hidden
+	// until the car is back above ground, for the same reason.
 	const dx = TOWER.feed.x - roof.x;
 	const dy = TOWER.feed.y - roof.y;
 	const len = Math.hypot(dx, dy) || 1;
 	const t = Math.min(150, len);
-	return { to: { x: roof.x + (dx / len) * t, y: roof.y + (dy / len) * t }, hit: false };
+	return {
+		to: { x: roof.x + (dx / len) * t, y: roof.y + (dy / len) * t },
+		hit: false,
+		show: roof.y < GROUND_Y - 20
+	};
 }
 
 /** One arc of the tower's coverage fan, opening down-left over the house. */

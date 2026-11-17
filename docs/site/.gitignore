@@ -1,0 +1,11 @@
+node_modules/
+/build/
+/.svelte-kit/
+
+# Render intermediates. The finished hero lives in docs/img/, committed.
+/tools/frames/
+/tools/out/
+/tools/package-lock.json
+.env
+.env.*
+!.env.example

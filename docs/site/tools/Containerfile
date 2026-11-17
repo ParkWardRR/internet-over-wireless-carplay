@@ -1,0 +1,20 @@
+# Everything needed to turn the site into the README's hero animation:
+# a browser to render it and ffmpeg to encode it. Built once and cached on
+# the build host; see render.sh.
+FROM docker.io/library/node:22-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      chromium \
+      ffmpeg \
+      fonts-inter \
+      fonts-liberation2 \
+      fonts-dejavu-core \
+      fontconfig \
+      ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && fc-cache -f
+
+# puppeteer drives the system chromium rather than downloading its own.
+ENV PUPPETEER_SKIP_DOWNLOAD=1
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV CHROME_PATH=/usr/bin/chromium

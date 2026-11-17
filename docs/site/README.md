@@ -1,17 +1,54 @@
-# The explainer site
+# The explainer, and the hero animation it renders
 
-A small static site built around one idea: wireless CarPlay and your internet
-connection are two separate links, and underground only one of them fails.
+This is a small SvelteKit site that explains one idea: wireless CarPlay and
+your internet connection are two separate links, and underground only one of
+them fails.
+
+**It is not deployed anywhere.** It exists to be filmed. `tools/` drives it
+through its three states in a headless browser and encodes the result into the
+animation at the top of the repository's README. If you are looking for the
+prose version of all this, it is the [project wiki]; this directory is the
+picture.
+
+[project wiki]: https://github.com/ParkWardRR/internet-over-wireless-carplay/wiki
+
+## Regenerating the hero
+
+Everything runs in one container — a browser to render, ffmpeg to encode — so
+nothing has to be installed on the host but podman.
+
+    podman build -t carplay-render -f tools/Containerfile tools/
+    podman run --rm -v "$PWD":/work:Z carplay-render sh /work/tools/render.sh
+
+That writes four files to `tools/out/`: two candidate variants, each as an
+animated WebP and a GIF.
+
+- **a** — the page as it really is, light, with the state tabs visible.
+- **b** — diagram only, dark, with a caption bar. This is the one currently in
+  the README.
+
+Copy the pair you want into `docs/img/` and point the `<picture>` element in
+the top-level README at it. The element offers the WebP first and falls back
+to the GIF, so both files need to be present.
+
+### Why it is filmed on a virtual clock
+
+A screenshot takes far longer than a frame interval. Capturing in real time
+would sample the animation at uneven moments and the result would judder. So
+`capture.mjs` puts Chrome on a virtual clock and advances it by exactly one
+frame between screenshots: every frame is evenly spaced no matter how slow the
+disk is, and the output is identical on every run.
+
+Everything variant-specific — theme, what is hidden, the caption bar — is
+injected by the capture script. The site has no idea it is being filmed, and
+should stay that way.
+
+## Working on the site itself
 
     npm install
     npm run dev      # http://localhost:5173
     npm run check    # svelte-check
     npm run build    # static files in build/
-
-To serve it from a subdirectory — GitHub Pages puts this repo under
-`/internet-over-wireless-carplay/` — build with the prefix:
-
-    BASE_PATH=/internet-over-wireless-carplay npm run build
 
 ## The diagram is two views, not one
 
@@ -25,8 +62,8 @@ To serve it from a subdirectory — GitHub Pages puts this repo under
   the flows along them change, which is what makes the three states
   comparable.
 
-The numbered badge on the car in the physical scene matches the badge on the
-inset's title. That is the only tie between them, and it has to stay.
+The numbered badge on the car matches the badge on the inset's title. That is
+the only tie between them, and it has to stay.
 
 The column ratio in `.views` is derived from the two viewBox aspect ratios so
 both frames render at the same height. Change a viewBox and that ratio needs
@@ -49,6 +86,11 @@ implying they are the same thing.
 off, because `prefers-reduced-motion` turns it off. Watch for keyframes that
 end at `opacity: 0`: with motion reduced the element never animates and simply
 disappears. The tower's coverage arcs have a resting opacity for that reason.
+
+**Nothing is drawn mid-flight that would be wrong.** The car's "can it reach
+the tower" ray is hidden while the car is on the ramp — aimed at the tower
+from halfway down it swept straight across the house, and a *no path out*
+label landed in a window.
 
 ## The topology is not a guess
 
