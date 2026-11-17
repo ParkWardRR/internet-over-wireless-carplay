@@ -1,65 +1,73 @@
 /*
- * One place for the palette. The scene and the prose share it so a
- * coloured word in a sentence means the same thing as that colour in
- * the drawing.
+ * The palette carries meaning, so it lives in one place and the drawing and
+ * the prose both read from it.
+ *
+ *   carplay    blue    the local CarPlay flow, phone <-> head unit
+ *   internet   amber   internet traffic and the upstream route carrying it
+ *   unavail    grey    a link that exists in principle and is not working
+ *   link       slate   a physical link: a Wi-Fi association or a cable
+ *
+ * Colour never carries a distinction on its own: every flow also has a label
+ * and a line style, and anything unavailable also gets an explicit symbol.
  */
 :root {
 	--ink: #11161d;
-	--ink-soft: #37414f;
+	--ink-soft: #3b4553;
 	--ink-faint: #6b7686;
-	--paper: #f7f5f1;
+	--paper: #f7f6f3;
 	--paper-raised: #ffffff;
-	--rule: #ddd8d0;
+	--panel: #f1efea;
+	--rule: #dcd7cf;
 
-	/* the two links the whole explainer is about */
 	--carplay: #2f6fd0;
-	--carplay-soft: #9cbdec;
-	--cellular: #c8821a;
-	--cellular-soft: #e8c793;
-
-	/* the way out this project adds */
-	--wire: #1f7a5c;
-	--wire-soft: #8fc4b2;
+	--carplay-wash: #dce8f9;
+	--internet: #bf7a12;
+	--internet-wash: #f7e9d0;
+	--unavail: #8d939c;
+	--link: #7c838e;
 
 	--fail: #b4322b;
 
-	/* the building */
-	--sky: #e9eef4;
-	--soil: #cfc6b8;
-	--concrete: #b9b4ab;
-	--concrete-dark: #8f8a81;
-	--wall: #e6e1d8;
+	/* the building: context, drawn light so the car can be the subject */
+	--sky: #eaeff5;
+	--soil: #e2dcd1;
+	--soil-line: #cdc5b6;
+	--concrete: #cfc9bf;
+	--concrete-edge: #a19b90;
+	--wall: #efece6;
+	--garage: #f4f6f9;
 
-	--font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
-		sans-serif;
+	--font:
+		ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 	--mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
 	:root {
 		--ink: #eef1f5;
-		--ink-soft: #bdc5d0;
-		--ink-faint: #8a93a0;
-		--paper: #14171c;
-		--paper-raised: #1c2027;
+		--ink-soft: #b9c1cc;
+		--ink-faint: #868f9c;
+		--paper: #13161b;
+		--paper-raised: #1a1e25;
+		--panel: #20252d;
 		--rule: #2e343d;
 
 		--carplay: #6ba3ec;
-		--carplay-soft: #2c4f7d;
-		--cellular: #e5a94a;
-		--cellular-soft: #6d4f1d;
-
-		--wire: #52b893;
-		--wire-soft: #235744;
+		--carplay-wash: #1e344f;
+		--internet: #e0a44c;
+		--internet-wash: #4a3415;
+		--unavail: #767e8a;
+		--link: #7b838f;
 
 		--fail: #e8615a;
 
-		--sky: #1a212b;
-		--soil: #2a2620;
-		--concrete: #3a3833;
-		--concrete-dark: #55524b;
-		--wall: #262b32;
-		--garage: #0d1015;
+		--sky: #1b222c;
+		--soil: #23262c;
+		--soil-line: #343942;
+		--concrete: #333841;
+		--concrete-edge: #525964;
+		--wall: #242932;
+		--garage: #10131a;
 	}
 }
 
@@ -102,7 +110,8 @@ code {
 	border-radius: 4px;
 }
 
-/* Honour the setting. Nothing here needs motion to be understood. */
+/* Motion is decoration here: every state is fully legible from the arrowheads
+   and the unavailable markers alone. */
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,

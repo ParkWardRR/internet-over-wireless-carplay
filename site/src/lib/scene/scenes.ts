@@ -2,68 +2,71 @@ export type SceneId = 'surface' | 'garage' | 'box';
 
 export type Scene = {
 	id: SceneId;
-	/** Label on the segmented control. */
 	tab: string;
+	/** Heading of the stable explanation panel. */
 	title: string;
-	caption: string;
+	/** Two short paragraphs. The panel height is fixed, so keep them even. */
+	body: string;
 	/** Is the car under the house? */
 	underground: boolean;
-	/** Is the Linux box on the link? */
+	/** Is the box on the link and routing? */
 	box: boolean;
-	/**
-	 * Cellular and internet are tracked separately on purpose. With the box
-	 * fitted there is still no cellular signal underground — what changed is
-	 * that the internet now arrives by another route entirely.
-	 */
-	cellular: { dead: boolean };
-	internet: { label: string; dead: boolean };
+	/** Can the phone reach the tower from where it is? */
+	cellular: boolean;
+	carplay: { label: string; state: 'up' };
+	internet: { label: string; state: 'up' | 'down' };
 };
 
 export const SCENES: Scene[] = [
 	{
 		id: 'surface',
 		tab: 'Above ground',
-		title: 'Two connections, not one',
-		caption:
-			'Wireless CarPlay is a private Wi-Fi network between your phone and the dashboard. ' +
-			'Your internet arrives separately, over cellular. Nothing on the car network carries ' +
-			'internet — it is a cable replacement, not a hotspot — and above ground you never ' +
-			'notice, because the phone has a tower.',
+		title: 'Two connections, and they are not related',
+		body:
+			'The head unit runs a small private Wi-Fi network and the phone joins it. That is all ' +
+			'wireless CarPlay is: a cable replacement between phone and dashboard. It carries no ' +
+			'internet.\n' +
+			'The internet is the phone’s own business, over cellular, on a different radio to a ' +
+			'different place. Above ground both work, so nobody notices they are separate.',
 		underground: false,
 		box: false,
-		cellular: { dead: false },
-		internet: { label: 'Cellular', dead: false }
+		cellular: true,
+		carplay: { label: 'Connected', state: 'up' },
+		internet: { label: 'Via cellular', state: 'up' }
 	},
 	{
 		id: 'garage',
 		tab: 'In the garage',
-		title: 'One of them fails',
-		caption:
-			'Park under the house and the tower is gone. CarPlay does not care: the dashboard ' +
-			'stays lit and music keeps playing. Maps keeps working too, as far as what it already ' +
-			'holds — a downloaded offline map still routes with no signal at all. What stops is ' +
-			'anything new: a search, a route through an area you have not downloaded, a map tile ' +
-			'that was never cached. CarPlay connected is not internet connected.',
+		title: 'Only one of them fails',
+		body:
+			'Underground the phone loses the tower. The CarPlay link is untouched — it never left ' +
+			'the car — so the dashboard stays lit, audio keeps playing, and a map already stored on ' +
+			'the phone still draws and still routes.\n' +
+			'What stops is anything that needs the network: a search, a route through an area with ' +
+			'no downloaded map, an uncached tile. CarPlay connected does not mean internet ' +
+			'connected.',
 		underground: true,
 		box: false,
-		cellular: { dead: true },
-		internet: { label: 'None', dead: true }
+		cellular: false,
+		carplay: { label: 'Connected', state: 'up' },
+		internet: { label: 'Unavailable', state: 'down' }
 	},
 	{
 		id: 'box',
 		tab: 'With the box',
-		title: 'Give it a second way out',
-		caption:
-			'A small Linux box joins the same CarPlay network as a second client and makes itself ' +
-			'the only IPv6 router on the link. The phone picks that up with plain SLAAC and ' +
-			'reaches the internet over Ethernet. The car is not modified and the phone’s IP ' +
-			'settings are not changed. Two catches: you have to tap Use For Internet once, and ' +
-			'every byte crosses the air twice — phone to head unit, head unit to box — which is ' +
-			'why the box caps itself at 2 Mbit/s rather than take CarPlay down with it.',
+		title: 'A second route, over the link that still works',
+		body:
+			'A Linux box in the garage joins the same CarPlay network as a second station, next to ' +
+			'the phone, and advertises itself as the only IPv6 router on that link. The phone picks ' +
+			'the route up by ordinary SLAAC; nothing is configured on the phone or the car.\n' +
+			'The box does not make internet. It forwards onto the house’s wired connection. And ' +
+			'because phone and box are both clients of the head unit, every packet is relayed by it ' +
+			'— across the same air, twice.',
 		underground: true,
 		box: true,
-		cellular: { dead: true },
-		internet: { label: 'Ethernet, through the box', dead: false }
+		cellular: false,
+		carplay: { label: 'Connected', state: 'up' },
+		internet: { label: 'Via the box, over Ethernet', state: 'up' }
 	}
 ];
 

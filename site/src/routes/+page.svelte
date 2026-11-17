@@ -1,126 +1,143 @@
 <script lang="ts">
-	import CutawayScene from '$lib/scene/CutawayScene.svelte';
+	import Diagram from '$lib/scene/Diagram.svelte';
 
 	const REPO = 'https://github.com/ParkWardRR/internet-over-wireless-carplay';
 	const WIKI = `${REPO}/wiki`;
-
-	const gotchas = [
-		{
-			n: '1',
-			head: 'You have to tap a switch on the phone',
-			body:
-				'iOS gives a CarPlay network the lowest service rank it has: background daemons will ' +
-				'use it, your apps will not. Until you tap Check For Internet Access → Use For ' +
-				'Internet, Maps fails while everything on the box looks perfect. On one instrumented ' +
-				'drive, 1.36 MB moved through the box and no user-facing app touched a byte.',
-			label: 'measured',
-			href: `${WIKI}/Troubleshooting`
-		},
-		{
-			n: '2',
-			head: 'Do not saturate it',
-			body:
-				'Every byte is relayed by the head unit, so it crosses the air twice and competes ' +
-				'with CarPlay’s own audio and screen. Pushed hard, the head unit dropped CarPlay ' +
-				'entirely and needed a hard reset to pair again. The box caps itself at 2 Mbit/s for ' +
-				'that reason.',
-			label: 'measured',
-			href: `${WIKI}/Bandwidth-and-Airtime`
-		},
-		{
-			n: '3',
-			head: 'There is spare airtime and you cannot use it',
-			body:
-				'CarPlay occupies about a quarter of the channel, leaving roughly 20 Mbit/s idle — ' +
-				'but the head unit’s relay collapses at around 3.8 Mbit/s. The bottleneck is the ' +
-				'relay, not the air, so free airtime is not evidence for a higher cap.',
-			label: 'measured',
-			href: `${WIKI}/Bandwidth-and-Airtime`
-		}
-	];
 </script>
 
 <svelte:head>
-	<title>Internet over wireless CarPlay</title>
+	<title>CarPlay can stay connected when the internet disappears</title>
 </svelte:head>
 
 <main>
 	<header class="hero">
-		<p class="eyebrow">BMW F32 · NBT EVO · iOS 27</p>
-		<h1>Wireless CarPlay is the connection to your dashboard — not your internet connection.</h1>
+		<p class="eyebrow">BMW F32 and F22 · factory NBT EVO · iPhone on iOS 27</p>
+		<h1>CarPlay can stay connected when the internet disappears.</h1>
 		<p class="lede">
-			Underground, CarPlay can stay perfectly connected while cellular service disappears. Two
-			independent links, only one of which failed. This project puts a small Linux box on the
-			car's own network and hands the phone a way out.
+			Wireless CarPlay is the link between your phone and the dashboard; your internet is a
+			separate link to somewhere else entirely — and underground, only one of them fails.
 		</p>
 	</header>
 
-	<section class="stage" aria-labelledby="diagram-heading">
-		<h2 id="diagram-heading" class="sr-only">The two connections, above ground and below</h2>
-		<CutawayScene />
-	</section>
+	<Diagram />
 
-	<section class="prose">
-		<h2>What the car's network actually is</h2>
-		<p>
-			Your car's wireless CarPlay creates its own private Wi-Fi network so the phone can talk to
-			the dashboard. That network carries <strong>no internet</strong> — it is a cable
-			replacement, not a hotspot. Normally you never notice, because the phone uses cellular for
-			everything else. Park underground and that stops.
-		</p>
-		<p>
-			The fix does not fight the car for IPv4. The head unit is the DHCP server, it offers no
-			router and no DNS, and iOS hides manual IP settings on a CarPlay network. But the link has
-			<em>no IPv6 router at all</em> — so the box becomes the only one, advertises a private
-			prefix and a DNS server, and the phone configures itself with plain SLAAC. The car is not
-			modified. The phone's IP settings are not changed.
-		</p>
-		<p class="more">
-			<a href={`${WIKI}/How-It-Works`}>How it works →</a>
-			<a href={`${WIKI}/The-CarPlay-Network`}>What the network is →</a>
-			<a href={`${WIKI}/Getting-Started`}>Set it up →</a>
-		</p>
-	</section>
+	<div class="detail">
+		<section>
+			<h2>The local CarPlay network</h2>
+			<p>
+				The head unit is an access point. It runs a small WPA2-PSK network on 2.4 GHz — channel
+				11, HT20, one spatial stream on both cars tested — and hands out addresses on
+				<code>172.16.224.0/24</code> with <strong>no router and no DNS</strong>. There is nowhere
+				for traffic to go but the dashboard. <span class="tag">measured</span>
+			</p>
+			<p>
+				It also advertises that fact: the beacon's 802.11u Interworking "Internet" bit is zero
+				and there is no Apple Device information element at all. No box on the network can
+				change what the car broadcasts about itself. <span class="tag">measured</span>
+			</p>
+			<p>
+				Two things about it turn out to be load-bearing. There is <strong>no client
+				isolation</strong>, so a second device may join and the head unit will relay between
+				its clients. And the head unit sends <strong>no IPv6 router advertisements</strong> of
+				its own. <span class="tag">measured</span>
+			</p>
+		</section>
 
-	<section class="prose">
-		<h2>The three things that catch everyone out</h2>
-		<ol class="gotchas">
-			{#each gotchas as g (g.n)}
-				<li>
-					<span class="num">{g.n}</span>
-					<div>
-						<h3>{g.head}</h3>
-						<p>{g.body}</p>
-						<a href={g.href}><span class="tag">{g.label}</span> read the detail →</a>
-					</div>
-				</li>
-			{/each}
-		</ol>
-	</section>
+		<section>
+			<h2>How this project supplies an internet route</h2>
+			<p>
+				A small Linux box in the garage joins the car's network as an ordinary second station,
+				one radio per car. It <strong>does not touch IPv4</strong>: it takes a DHCP lease like
+				any other client and adds nothing there. The car owns IPv4 and keeps it.
+			</p>
+			<p>
+				Instead it becomes the one thing the link is missing — <strong>the only IPv6 router on
+				it</strong>. It advertises a private prefix, itself as the route, and a DNS server. The
+				phone picks that up by plain SLAAC, with nothing configured on the phone and nothing
+				changed in the car.
+			</p>
+			<p>
+				From there the box forwards onto <strong>the house's wired connection</strong> over
+				Ethernet, translating as needed: NAT66 for the private prefix, and DNS64 with NAT64 for
+				destinations that have no IPv6 address. It is a route onto an internet connection that
+				already exists — the box does not create one. When its upstream health checks fail, or
+				the car starts to leave, it withdraws the route so the phone falls back to cellular.
+				<span class="tag">source</span>
+			</p>
+			<p class="more">
+				<a href={`${WIKI}/How-It-Works`}>How it works →</a>
+				<a href={`${WIKI}/Getting-Started`}>Set it up →</a>
+			</p>
+		</section>
 
-	<section class="prose">
-		<h2>How confident is any of this?</h2>
-		<p>
-			Every claim in the wiki is labelled <span class="tag">measured</span>,
-			<span class="tag">source</span>, <span class="tag">emulator</span> or
-			<span class="tag">inferred</span>. Measured on two BMWs with factory NBT EVO head units and
-			one iPhone on iOS 27, in one garage. Treat it as a solid data point, not a universal law —
-			including the conclusions that turned out to be wrong, which are kept in
-			<code>docs/test-log.md</code>.
-		</p>
-		<p class="more">
-			<a href={`${WIKI}/Open-Questions`}>What is still unproven →</a>
-			<a href={`${WIKI}/Measuring`}>Measure it yourself →</a>
-		</p>
-	</section>
+		<section>
+			<h2>Measured limits, and the switch you have to tap</h2>
+			<p>
+				<strong>Nothing works for your apps until you tap once.</strong> iOS ranks a CarPlay
+				network's service as low as it goes, which gets it only a scoped default route:
+				background daemons use it, applications ignore it. In Settings, <em>Check For Internet
+				Access</em> → <em>Use For Internet</em> lifts that. Before the tap the box can look
+				perfect while no user-facing app moves a byte. <span class="tag">measured</span>
+			</p>
+			<p>
+				Afterwards iOS often re-checks by itself — across absences of 15 to 29 minutes the
+				phone came back 4 to 24 seconds after the box resumed. <strong>Not reliably</strong>,
+				though: two sessions the same morning never validated and forwarded nothing, and a real
+				car restart needed the tap again. <span class="tag">measured</span>
+			</p>
+			<p>
+				<strong>The link cannot be driven hard.</strong> Because phone and box are both clients
+				of the head unit, every byte is relayed and crosses the air twice, sharing the channel
+				with CarPlay's own audio and screen. Pushed hard, the head unit dropped CarPlay
+				entirely and needed a hard reset to pair again. Capping the box's egress at 2 Mbit/s
+				cut the worst round trip to the phone from <strong>2051 ms to 378 ms</strong> with no
+				disconnects. <span class="tag">measured</span>
+			</p>
+			<p>
+				There is spare airtime and it is not usable. CarPlay occupies about 26.5% of the
+				channel (median, measured from inside the car), leaving roughly 20 Mbit/s idle — but
+				the relay falls over around 3.8 Mbit/s while the air is still free. <strong>The
+				bottleneck is the head unit, not the Wi-Fi</strong>, so idle airtime is not an argument
+				for a higher cap. <span class="tag">measured</span>
+			</p>
+			<p class="more">
+				<a href={`${WIKI}/Bandwidth-and-Airtime`}>Bandwidth and airtime →</a>
+				<a href={`${WIKI}/Troubleshooting`}>Troubleshooting →</a>
+			</p>
+		</section>
+
+		<section>
+			<h2>What this has actually been tested on</h2>
+			<p>
+				<strong>Two BMWs with factory NBT EVO head units, one iPhone on iOS 27.0.1, one
+				garage.</strong> Treat all of it as a result about these head units and this phone, not
+				about CarPlay, cars or iOS in general. Other head units announce internet in their
+				beacon and behave differently by design.
+			</p>
+			<p>
+				The coverage is uneven even within that. The airtime and shaping figures come from one
+				car on single evenings. The full path — phone validated, traffic forwarded — is well
+				established on one of the two cars and has been seen on the other only briefly.
+			</p>
+			<p>
+				Still unresolved: whether a phone has ever genuinely used the NAT64 translator (it is
+				running and resolving names, but its tunnel has carried almost nothing); both phones
+				validated at the same time; and how quickly the phone returns to cellular when driving
+				out.
+			</p>
+			<p class="more">
+				<a href={`${WIKI}/Open-Questions`}>Open questions →</a>
+				<a href={`${WIKI}/Measuring`}>Reproduce the measurements →</a>
+			</p>
+		</section>
+	</div>
 
 	<footer>
 		<a href={REPO}>Source on GitHub</a>
 		<span aria-hidden="true">·</span>
 		<a href={WIKI}>Project wiki</a>
 		<p class="fineprint">
-			Nothing here is affiliated with or endorsed by BMW or Apple. CarPlay is a trademark of
-			Apple Inc.
+			Not affiliated with or endorsed by BMW or Apple. CarPlay is a trademark of Apple Inc.
 		</p>
 	</footer>
 </main>
@@ -129,65 +146,58 @@
 	main {
 		max-width: 1180px;
 		margin: 0 auto;
-		padding: clamp(28px, 6vw, 72px) clamp(18px, 4vw, 40px) 60px;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
+		padding: clamp(28px, 5vw, 64px) clamp(18px, 4vw, 40px) 60px;
 	}
 
 	.hero {
-		max-width: 52ch;
-		margin-bottom: clamp(28px, 5vw, 48px);
+		max-width: 40ch;
+		margin-bottom: clamp(26px, 4vw, 44px);
 	}
 	.eyebrow {
 		margin: 0 0 14px;
 		font-size: 0.78rem;
 		font-weight: 650;
-		letter-spacing: 0.1em;
+		letter-spacing: 0.09em;
 		text-transform: uppercase;
 		color: var(--ink-faint);
 	}
 	h1 {
-		font-size: clamp(1.8rem, 3.6vw, 2.55rem);
+		font-size: clamp(1.8rem, 3.4vw, 2.5rem);
 		font-weight: 680;
 		letter-spacing: -0.03em;
 	}
 	.lede {
 		margin: 0;
-		font-size: clamp(1.02rem, 1.6vw, 1.18rem);
+		font-size: clamp(1.02rem, 1.5vw, 1.15rem);
 		color: var(--ink-soft);
-		max-width: 56ch;
+		max-width: 58ch;
 	}
 
-	.stage {
-		margin-bottom: clamp(40px, 7vw, 76px);
+	.detail {
+		display: grid;
+		gap: clamp(30px, 4vw, 44px);
+		max-width: 70ch;
+	}
+	.detail h2 {
+		font-size: clamp(1.22rem, 2vw, 1.45rem);
+		margin-bottom: 0.5em;
+	}
+	.detail p {
+		color: var(--ink-soft);
+		margin: 0 0 0.85em;
+	}
+	.detail strong {
+		color: var(--ink);
+		font-weight: 620;
 	}
 
-	.prose {
-		max-width: 68ch;
-		margin-bottom: clamp(36px, 6vw, 64px);
-	}
-	.prose h2 {
-		font-size: clamp(1.3rem, 2.4vw, 1.6rem);
-		margin-bottom: 0.6em;
-	}
-	.prose p {
-		color: var(--ink-soft);
-	}
 	.more {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 1.2em;
 		font-weight: 550;
 		font-size: 0.95rem;
+		margin-top: 1.1em;
 	}
 	.more a {
 		text-decoration: none;
@@ -196,63 +206,24 @@
 		text-decoration: underline;
 	}
 
-	.gotchas {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: grid;
-		gap: 22px;
-	}
-	.gotchas li {
-		display: flex;
-		gap: 16px;
-		padding-top: 20px;
-		border-top: 1px solid var(--rule);
-	}
-	.num {
-		flex: 0 0 auto;
-		width: 30px;
-		height: 30px;
-		border-radius: 50%;
-		display: grid;
-		place-items: center;
-		background: color-mix(in srgb, var(--carplay) 15%, transparent);
-		color: var(--carplay);
-		font-size: 0.9rem;
-		font-weight: 700;
-	}
-	.gotchas h3 {
-		font-size: 1.06rem;
-		margin-bottom: 0.3em;
-	}
-	.gotchas p {
-		margin: 0 0 0.6em;
-	}
-	.gotchas a {
-		font-size: 0.9rem;
-		font-weight: 550;
-		text-decoration: none;
-	}
-	.gotchas a:hover {
-		text-decoration: underline;
-	}
-
 	.tag {
 		display: inline-block;
 		font-family: var(--mono);
-		font-size: 0.72rem;
+		font-size: 0.68rem;
 		font-weight: 600;
-		letter-spacing: 0.02em;
+		letter-spacing: 0.03em;
 		text-transform: uppercase;
-		color: var(--ink-soft);
-		background: color-mix(in srgb, var(--ink) 9%, transparent);
+		color: var(--ink-faint);
+		background: color-mix(in srgb, var(--ink) 8%, transparent);
 		border-radius: 4px;
 		padding: 0.15em 0.45em;
-		margin-right: 0.3em;
+		vertical-align: 0.1em;
+		white-space: nowrap;
 	}
 
 	footer {
 		border-top: 1px solid var(--rule);
+		margin-top: clamp(40px, 5vw, 64px);
 		padding-top: 22px;
 		font-size: 0.92rem;
 		color: var(--ink-faint);
