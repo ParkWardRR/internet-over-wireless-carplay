@@ -2,7 +2,7 @@
 
 Give your iPhone a working internet connection on your car's wireless CarPlay network, in a place with no cell signal.
 
-Your car's wireless CarPlay creates its own private Wi-Fi network so the phone can talk to the dashboard. That network carries **no internet** — it is a cable replacement, not a hotspot. Normally you never notice, because the phone uses cellular for everything else. Park underground and that stops: CarPlay still shows Maps, but Maps cannot search, route, or load a tile.
+Your car's wireless CarPlay creates its own private Wi-Fi network so the phone can talk to the dashboard. That network carries **no internet** — it is a cable replacement, not a hotspot. Normally you never notice, because the phone uses cellular for everything else. Park underground and that stops: CarPlay still shows Maps, and a map you already downloaded still routes with no signal at all — but anything *new* fails. No search, no route through an area you have not downloaded, no uncached tile.
 
 This project puts a small Linux box on that same network and hands the phone a route out to a wired connection. **The car is not modified. The phone's IP settings are not changed.**
 

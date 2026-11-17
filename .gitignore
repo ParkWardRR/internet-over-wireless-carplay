@@ -5,3 +5,5 @@ captures/
 *.pcapng
 ios/CarNetProbe/*.xcodeproj/
 emu/out/
+.nimbalyst/
+node_modules/

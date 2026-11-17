@@ -11,7 +11,7 @@
 
 **Get internet on wireless CarPlay in a garage with no cell signal.**
 
-Your car's wireless CarPlay runs its own little Wi-Fi network. It carries no internet — it is a cable replacement, not a hotspot. Normally you never notice, because your phone uses cellular for everything else. Park underground and that stops working: CarPlay still shows Maps, but Maps can't search, route, or load a tile.
+Your car's wireless CarPlay runs its own little Wi-Fi network. It carries no internet — it is a cable replacement, not a hotspot. Normally you never notice, because your phone uses cellular for everything else. Park underground and that stops working: CarPlay still shows Maps, and a map you already downloaded still routes with no signal at all — but anything new fails. No search, no route through an area you haven't downloaded, no uncached tile.
 
 This puts a small Linux box on that same car network and hands your phone a route out to a wired internet connection. The car is not modified. Your phone's IP settings are not changed. You tap one switch the first time.
 

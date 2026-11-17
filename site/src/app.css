@@ -1,0 +1,114 @@
+/*
+ * One place for the palette. The scene and the prose share it so a
+ * coloured word in a sentence means the same thing as that colour in
+ * the drawing.
+ */
+:root {
+	--ink: #11161d;
+	--ink-soft: #37414f;
+	--ink-faint: #6b7686;
+	--paper: #f7f5f1;
+	--paper-raised: #ffffff;
+	--rule: #ddd8d0;
+
+	/* the two links the whole explainer is about */
+	--carplay: #2f6fd0;
+	--carplay-soft: #9cbdec;
+	--cellular: #c8821a;
+	--cellular-soft: #e8c793;
+
+	/* the way out this project adds */
+	--wire: #1f7a5c;
+	--wire-soft: #8fc4b2;
+
+	--fail: #b4322b;
+
+	/* the building */
+	--sky: #e9eef4;
+	--soil: #cfc6b8;
+	--concrete: #b9b4ab;
+	--concrete-dark: #8f8a81;
+	--wall: #e6e1d8;
+
+	--font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+		sans-serif;
+	--mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--ink: #eef1f5;
+		--ink-soft: #bdc5d0;
+		--ink-faint: #8a93a0;
+		--paper: #14171c;
+		--paper-raised: #1c2027;
+		--rule: #2e343d;
+
+		--carplay: #6ba3ec;
+		--carplay-soft: #2c4f7d;
+		--cellular: #e5a94a;
+		--cellular-soft: #6d4f1d;
+
+		--wire: #52b893;
+		--wire-soft: #235744;
+
+		--fail: #e8615a;
+
+		--sky: #1a212b;
+		--soil: #2a2620;
+		--concrete: #3a3833;
+		--concrete-dark: #55524b;
+		--wall: #262b32;
+		--garage: #0d1015;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html {
+	background: var(--paper);
+	-webkit-text-size-adjust: 100%;
+}
+
+body {
+	margin: 0;
+	font-family: var(--font);
+	color: var(--ink);
+	line-height: 1.6;
+	font-size: 17px;
+}
+
+h1,
+h2,
+h3 {
+	line-height: 1.2;
+	letter-spacing: -0.015em;
+	margin: 0 0 0.4em;
+	text-wrap: balance;
+}
+
+a {
+	color: var(--carplay);
+	text-underline-offset: 2px;
+}
+
+code {
+	font-family: var(--mono);
+	font-size: 0.88em;
+	background: color-mix(in srgb, var(--ink) 8%, transparent);
+	padding: 0.1em 0.35em;
+	border-radius: 4px;
+}
+
+/* Honour the setting. Nothing here needs motion to be understood. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.001ms !important;
+	}
+}
