@@ -9,7 +9,8 @@ What is genuinely unknown, so nobody has to rediscover the boundary.
 | **Does any of this behave the same on another head unit?** | Measured on two of the same model, in one garage. Nothing here should be assumed to generalise |
 | **Another phone, another iOS version?** | One phone, iOS 27. The *Use For Internet* switch does not exist before iOS 27 at all |
 | **Can two cars be served at once?** | **Yes** — 1 minute 53 seconds with two routes up, a prefix each and a phone attached to each, on independent radios. Ended by the head units when the cars were switched off. Not a soak test |
-| **Can two cars be *usable* at once?** | **No.** In that window **neither phone validated**, so only background traffic moved. Serving both and both being usable are different claims |
+| **Does each car work on the current build?** | **Yes, both.** Each has been served and each has had iOS validate the link, so apps could use it. The evidence is lopsided: one car has validated 11 times over three days, the other once |
+| **Can two cars be *usable* at once?** | **Not shown.** In the window where both were served, neither phone validated, so only background traffic moved. Each car working and both working at once are different claims |
 | **Has either car completed a long session on this build?** | No. Minutes, not hours |
 | **What is the relay's actual limit?** | Between 2 and 4 Mbit/s. It survives 2; it died somewhere under 4. Never bisected |
 | **Does automatic cap tuning converge on a real car?** | It converges in tests and has never run on a car |
