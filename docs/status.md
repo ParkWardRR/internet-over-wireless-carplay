@@ -20,7 +20,7 @@ Claims are labelled: **measured** (on the car, phone or box), **source** (code o
 | **Fixed since** | **NAT64 had never worked for any public address**: `net.ipv4.ip_forward` was **0**, so tayga translated correctly and the kernel dropped every translated packet. Presented as "Reddit doesn't work" with a healthy-looking box and a climbing counter. Enabled at runtime, persisted in `/etc/sysctl.d/`, and carplayd now sets it when `nat64` is configured with a read-back. Reddit over NAT64: **rc=200 in 0.24 s**; `nat64_public` 304 → 7101 packets in seconds (2026-11-16, measured) |
 | **Fixed since** | **NAT64 only ever reached three hardcoded hosts.** The /96 is inside `fc00::/7`, which the isolation reject covers, so every IPv4-only *public* site was rejected while DNS64 cheerfully synthesised an address for it — including `gsp1.apple.com`, push and Mapbox, the hosts the README said NAT64 was for. Now: synthesised non-global IPv4 ranges rejected, the rest of the /96 accepted, allowlist still first. Deployed 2026-11-16; **unverified on the wire** (no car present) — the new `nat64_public` counter will prove it |
 | **Fixed since** | **Our own traffic could take CarPlay down.** Saturating the box's path made the F22's head unit drop CarPlay entirely (hard reset to re-pair). An HTB egress cap on the car link (`rate = 2mbit`, 16-packet leaf) cut the worst round-trip to the phone from **2051 ms to 378 ms** and held 120 s of the same load with zero disconnects (2026-11-16, measured; needs a soak) |
-| **Next** | **One drive with both cars in the garage**, which settles all three open things at once: the F32 on this build, two cars served simultaneously, and a phone using NAT64 |
+| **Next** | **One drive with both cars, and the tap on both phones.** Two cars served at once is **done** (2026-11-16, 1m53s, two routes, two phones attached) — but neither phone validated, so no app traffic moved through either. What remains: both phones *validated* simultaneously, a phone using NAT64, and a session longer than a couple of minutes |
 
 ## What we learned
 
@@ -135,7 +135,7 @@ flowchart LR
   H --> I["Two boxes:<br/>fixed ownership,<br/>failure injection"]
 ```
 
-**The gate is cheap and settles three things at once.** Both cars parked, one phone, one drive out and back. It closes: the F32 on the two-radio build, two cars served simultaneously, and a phone actually using NAT64. Nothing downstream is worth doing first, because all of it assumes the gate passes.
+**The gate is cheap, and it is now narrower.** Two cars served simultaneously closed on 2026-11-16: 1m53s with both routes up and a phone on each, on independent radios. What the gate still has to close is **both phones validated at the same time** — neither was, so only background traffic moved — plus a phone actually using NAT64 and a session lasting more than a couple of minutes. Nothing downstream is worth doing first.
 
 | # | Test or change | Accepted when | State |
 |---|---|---|---|
@@ -158,7 +158,7 @@ flowchart LR
 
 | # | Item | Needs | Who |
 |---|---|---|---|
-| 1 | ⬜ **THE GATE — both cars in the garage, one drive** (roadmap 4). Settles the F32 on this build, both cars at once, and a phone over NAT64. Everything else waits on it | both cars parked, one phone | you park and drive; I read the logs |
+| 1 | 🟡 **THE GATE — partly closed.** Both cars served at once ✅ (2026-11-16, 1m53s). Still open: **both phones validated simultaneously** (neither was), a phone over NAT64, and a session beyond a couple of minutes | both cars parked, both phones tapped | you park, tap and drive; I read the logs |
 | 2 | ⬜ **F32 on the two-radio build** (roadmap 5): join time, route, Maps, negotiated cipher, cellular off. The car has not been in RF range during any logged window; nothing suggests a fault | F32 in the garage | you start the car; I read the log |
 | 3 | ⬜ **A phone over NAT64** (roadmap 10). Deployed 2026-11-13, five names resolve, and the `nat64` tun has carried **3 packets, all outbound**. Until a phone uses it this is untested code in the path | a phone on a car link reaching `nas`/`media`/`dns` | you open the names; I watch the tun |
 | 4 | ◐ **Characterise *Use For Internet* persistence** (roadmap 8). Known: re-validates by itself across 15–29 min absences (2026-11-14), does **not** survive a 54 min car restart (2026-11-11). Unknown: where the boundary is, whether it holds overnight, and whether it differs per car or per phone | real use over several days | you observe; I correlate against `validated` |

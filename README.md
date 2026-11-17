@@ -106,7 +106,11 @@ Full method and caveats: **[docs/bandwidth.md](docs/bandwidth.md)**. The tool is
 
 Yes, on a real car, measured — most recently **44,327 packets / 6.2 MB** forwarded to a phone in a single day.
 
-The honest caveat: **one car at a time is proven, both cars at once is not.** There are two cars here, an F22 and an F32. The F22 is the one currently working. The F32 was proven back in November 2026 on an older single-radio setup and has not been in the garage since the per-car radios went in, so it has never run on the current build. Nothing suggests a fault — its radio is healthy and hunting, the car is just elsewhere.
+The honest caveat, now narrower than it was: **both cars have been served at once — but neither phone had app-level internet while they were.**
+
+On 2026-11-16 the F32 and the F22 were served simultaneously for **1 minute 53 seconds**: two routes up, a prefix each, a phone attached to each, on independent radios. Both sessions ended with the head units deauthenticating at −60 and −53 dBm, which is what they send when the car is switched off.
+
+What is still open is the next step, not the first one: **neither phone validated in that window**, so only background traffic moved (386 kB and 216 kB). Two cars *served* at once is proven; two cars *usable* at once is not, and nor is either car holding a long session on this build.
 
 **NAT64 was quietly broken until 2026-11-16.** It is what lets the phone reach IPv4-only hosts over an IPv6-only path, and it only ever worked for three hardcoded addresses: the synthesised prefix sits inside `fc00::/7`, which the isolation rules reject, and the only exceptions were the named home hosts. So every IPv4-only *public* site was refused while DNS handed the phone a perfectly routable-looking address for it — Reddit, which has no native IPv6, is how it surfaced. Fixed by rejecting the synthesised form of each private IPv4 range and then permitting the rest. Deployed; **not yet confirmed by a phone**, so the box counts it (`nat64_public`) rather than assuming.
 
@@ -150,7 +154,7 @@ Measured on the box and the phone, not inferred.
 |---|---|---|
 | **Box joins the car's CarPlay Wi-Fi** | ✅ repeatedly, 2026-11-14, on its own USB radio | ✅ 2026-11-02/03, on the old shared radio |
 | **Phone gets a route and real app traffic** | ✅ **44,327 packets / 6.2 MB forwarded**, 5 × `validated` | ✅ 2026-11-02, Maps search + routing on CarPlay |
-| **On the current two-radio build** | ✅ this is the build in service | ⬜ **never served** — not in RF range during any logged window |
+| **On the current two-radio build** | ✅ this is the build in service | ✅ served 2026-11-16, **1m53s alongside the F22** — but the phone never validated, so no app traffic |
 | **Clean departures (goodbye before the link dies)** | ✅ 3/3 on a real drive | ⚠️ an early departure stranded a route; fixed, re-tested on the F22 only |
 
 > **Resolve cars by SSID, never by letter.** `carplayd.conf`'s `[car A]` is the F32 and `[car B]` is the F22. `secrets/carplay.env` uses the opposite convention.
@@ -184,7 +188,7 @@ Measured on the box and the phone, not inferred.
 
 ## Roadmap
 
-The short version: **get both cars in the garage at once.** That single drive settles the three things standing open — the F32 on the two-radio build, two cars served simultaneously, and a phone actually using NAT64.
+The short version: **get both cars in the garage at once, and tap the switch on both phones.** Two cars served simultaneously is now done; what it did not show is either phone actually *using* the link while both were up. That drive also settles whether a phone really uses NAT64.
 
 Full roadmap, acceptance criteria and open items: **[docs/status.md](docs/status.md)**.
 
