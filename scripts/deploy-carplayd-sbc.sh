@@ -32,6 +32,22 @@ fi
 [ -n "${CAR_B_SSID:-}" ] && [ -n "${CAR_B_PSK:-}" ] && [ -n "${CAR_A_SSID:-}" ] && [ -n "${CAR_A_PSK:-}" ] \
 	|| { echo "secrets/carplay.env needs CAR_A_* and CAR_B_*" >&2; exit 1; }
 
+# The defaults above are scrubbed placeholders, because this repo is public.
+# Left as-is they do not fail: rsync blocks trying to resolve a .local name that
+# does not exist, the script prints "building on build-host..." and then nothing
+# for minutes, and it looks exactly like a slow cross-compile. Fail now instead.
+for v in SBC BUILD; do
+	eval "h=\$$v"
+	case "$h" in
+	*@garage-sbc.local | *@build-host.local | user@*)
+		echo "$v is still the placeholder '$h'." >&2
+		echo "Set real hosts in secrets/carplay.env (gitignored, sourced below) or on the command line:" >&2
+		echo "  SBC=<user@host> BUILD=<user@host> $0" >&2
+		exit 1
+		;;
+	esac
+done
+
 echo "building on build-host..."
 rsync -a --delete --exclude secrets/ --exclude .git/ --exclude emu/out/ --exclude 'ios/CarNetProbe/*.xcodeproj' \
 	"$HERE/" "$BUILD:builds/carplay-deploy/"
@@ -42,6 +58,13 @@ scp -q "$BUILD:builds/carplay-deploy/out/carplayd-linux-arm64" "$TMP/carplayd"
 
 # The F32 is car B in secrets (BMW#####), the F22 car A (BMW#####); carplayd
 # calls the F32 "A" (priority) and the F22 "B".
+#
+# CAR_RATE caps each car link's egress (carplayd `rate`). Measured on the F22,
+# 2026-11-16: uncapped, saturating the box made the head unit drop CarPlay and
+# need a hard reset; at 2mbit the same load held with no disconnect. Both cars
+# get it -- same head unit family, and only the F22 was actually measured.
+# Set CAR_RATE=off in secrets/carplay.env to disable.
+CAR_RATE="${CAR_RATE:-2mbit}"
 umask 077
 cat > "$TMP/carplayd.conf" <<CONF
 # Unused when every car names its own radio below, and kept off a bare phyN
@@ -91,6 +114,7 @@ join = -80
 leave = -85
 rejoin = -77
 drop = 6
+rate = $CAR_RATE
 ${CAR_A_PHY:+phy = $CAR_A_PHY}
 ${CAR_A_STA:+sta = $CAR_A_STA}
 
@@ -103,6 +127,7 @@ join = -80
 leave = -85
 rejoin = -77
 drop = 6
+rate = $CAR_RATE
 ${CAR_B_PHY:+phy = $CAR_B_PHY}
 ${CAR_B_STA:+sta = $CAR_B_STA}
 CONF

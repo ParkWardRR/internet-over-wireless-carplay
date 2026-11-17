@@ -105,32 +105,70 @@ func forwardChain(t *testing.T, rs string) string {
 	return body
 }
 
-// Only the named hosts, one /128 each. Permitting the /96 would quietly turn an
-// allowlist into "the whole homelab", which is the thing the config is for.
-func TestNAT64AcceptsOnlyAllowlistedHosts(t *testing.T) {
+// REVISED 2026-11-16. These two tests used to assert that *only* the
+// allowlisted /128s were ever accepted and that an empty allowlist permitted
+// nothing at all. That was a real bug, not a safety property: DNS64 synthesises
+// an AAAA for every IPv4-only name, so the phone got a routable-looking address
+// for any IPv4-only *public* site and the firewall rejected it.
+// www.reddit.com (no native AAAA; it CNAMEs to Fastly) failed exactly that way
+// -- rc=200 from the box, instant reject from the car prefix -- and so,
+// silently, had gsp1.apple.com, push and Mapbox, the three hosts the README
+// said NAT64 was for.
+//
+// The invariant those tests were really protecting is "a car cannot reach the
+// home LAN", and it is now enforced by rejecting the synthesised form of every
+// non-global IPv4 range before the /96 is accepted. That is stronger than an
+// enumerated allowlist, because it is derived from the address ranges rather
+// than from remembering to list a host. The allowlist keeps its original job:
+// it is the only way to reach a *private* address, and nothing else.
+
+// A private host is reachable only if it is on the allowlist.
+func TestNAT64AllowlistIsTheOnlyRouteToPrivateHosts(t *testing.T) {
 	rs := nftRuleset(nat64Config(t, "10.0.0.21"), nil)
-	if !strings.Contains(rs, "fd5c:ba1e:f32:64::a00:15") {
-		t.Errorf("allowed host missing from the ruleset:\n%s", rs)
+	fc := forwardChain(t, rs)
+	if !strings.Contains(fc, "fd5c:ba1e:f32:64::a00:15") {
+		t.Errorf("allowed host missing from the forward chain:\n%s", fc)
 	}
-	for _, l := range strings.Split(rs, "\n") {
-		if strings.Contains(l, "accept") && strings.Contains(l, "fd5c:ba1e:f32:64::/96") {
-			t.Errorf("the whole NAT64 prefix is accepted, not just the allowlist: %s", strings.TrimSpace(l))
-		}
-	}
-	// A host that was never allowed must not appear anywhere.
+	// A host that was never allowed must not be named anywhere.
 	if strings.Contains(rs, "a00:35") {
 		t.Errorf("an un-allowlisted host leaked into the ruleset:\n%s", rs)
 	}
+	// 10.0.0.0/8 synthesised must be rejected, and that reject must come after
+	// the allowlist accept (or the allowed host is dead) and before the /96
+	// accept (or the whole homelab is open).
+	allow := strings.Index(fc, "fd5c:ba1e:f32:64::a00:15")
+	priv := strings.Index(fc, "fd5c:ba1e:f32:64::a00:0/104")
+	open := strings.Index(fc, `ip6 daddr fd5c:ba1e:f32:64::/96 counter name "nat64_public" accept`)
+	if allow < 0 || priv < 0 || open < 0 {
+		t.Fatalf("missing a rule (allow=%d priv=%d open=%d):\n%s", allow, priv, open, fc)
+	}
+	if !(allow < priv && priv < open) {
+		t.Errorf("order must be allowlist, then private reject, then /96: got %d %d %d", allow, priv, open)
+	}
 }
 
-// With no allowlist there is nothing to permit, and the ruleset must stay shut
-// rather than fall back to something broader.
-func TestNAT64WithoutAllowlistPermitsNothing(t *testing.T) {
-	rs := nftRuleset(nat64Config(t), nil)
-	for _, l := range strings.Split(rs, "\n") {
-		if strings.Contains(l, "ip6 daddr") && strings.Contains(l, "accept") {
-			t.Errorf("empty allowlist still produced a forwarding accept: %s", strings.TrimSpace(l))
+// With no allowlist, public IPv4 still has to work -- that is the feature --
+// while every private range stays shut.
+func TestNAT64WithoutAllowlistStillReachesPublicIPv4(t *testing.T) {
+	fc := forwardChain(t, nftRuleset(nat64Config(t), nil))
+	if !strings.Contains(fc, `ip6 daddr fd5c:ba1e:f32:64::/96 counter name "nat64_public" accept`) {
+		t.Fatalf("public IPv4 via NAT64 is unreachable with an empty allowlist:\n%s", fc)
+	}
+	for _, priv := range []string{
+		"fd5c:ba1e:f32:64::a00:0/104",  // 10/8
+		"fd5c:ba1e:f32:64::ac10:0/108", // 172.16/12
+		"fd5c:ba1e:f32:64::c0a8:0/112", // 192.168/16
+	} {
+		if !strings.Contains(fc, priv) {
+			t.Errorf("%s must still be rejected:\n%s", priv, fc)
 		}
+		if strings.Index(fc, priv) > strings.Index(fc, `ip6 daddr fd5c:ba1e:f32:64::/96 counter name "nat64_public" accept`) {
+			t.Errorf("%s is rejected after the /96 accept, so it is dead code", priv)
+		}
+	}
+	// No /128 accept, because there is nothing allowlisted.
+	if strings.Contains(fc, "a00:15") {
+		t.Errorf("an empty allowlist produced a host accept:\n%s", fc)
 	}
 }
 

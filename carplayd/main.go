@@ -144,6 +144,7 @@ func main() {
 func buildLinks(cfg Config, out *evWriter, m *metrics, prof *profiles) []*daemon {
 	groups := cfg.radios()
 	links := make([]*daemon, 0, len(groups))
+	serve := newServeState() // one per box: the radios have to see each other
 	for i, cars := range groups {
 		lc := cfg
 		lc.Cars = cars
@@ -151,7 +152,7 @@ func buildLinks(cfg Config, out *evWriter, m *metrics, prof *profiles) []*daemon
 		lc.CtrlDir = cfg.ctrlDirFor(cars[0].Phy)
 		links = append(links, &daemon{
 			cfg: lc, fw: cfg, owner: i == 0, label: cars[0].STA,
-			out: out, m: m, prof: prof,
+			out: out, m: m, prof: prof, serve: serve,
 			held: map[string]bool{}, firstSeen: map[string]time.Time{},
 			lastSurvey: map[string]time.Time{}, relaxed: map[string]int{},
 			leftAt:  map[string]time.Time{},

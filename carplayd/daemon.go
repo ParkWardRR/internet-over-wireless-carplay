@@ -47,6 +47,7 @@ type daemon struct {
 	lastCheck    time.Time
 	blocked      []netip.Prefix // what the firewall currently keeps phones from
 	prof         *profiles      // learned per-car thresholds (shared)
+	serve        *serveState    // which radio serves which channel (shared)
 	savedProf    time.Time
 	scans        scanWatch // empty-scan counter behind the radio stall watchdog
 	// Whether iOS has validated this car network for internet use, which a
@@ -422,6 +423,16 @@ func (d *daemon) hunt() {
 		return
 	}
 	d.huntTick++
+	// Scanning the channel a sibling radio is serving on costs that link
+	// airtime it cannot measure (see cochannel.go). Back off rather than stop,
+	// so a second car is still found.
+	if sta, ch, skip := deferHunt(d.serve, d.cfg.STA, d.cfg.Cars, d.huntTick); skip {
+		if d.huntTick%cochannelBackoff == 1 {
+			d.ev("hunt_backoff", "cochannel_with="+sta, "channel="+strconv.Itoa(ch),
+				"every="+strconv.Itoa(cochannelBackoff)+"_ticks")
+		}
+		return
+	}
 	d.cmd.cmd("SCAN freq=" + tickFreqs(d.cfg.Cars, d.huntTick)) // FAIL-BUSY just means a scan is already running
 }
 
@@ -602,6 +613,7 @@ func (d *daemon) startServing(car *Car) {
 	d.servingMu.Lock()
 	d.serving = car
 	d.servingMu.Unlock()
+	d.serve.serving(d.cfg.STA, car.Channel)
 	d.ra, d.below, d.belowTrend, d.samples = ra, time.Time{}, time.Time{}, nil
 	d.resetFail() // the new station's counters start from their own zero
 	d.servingSince, d.lastPhone, d.phones = time.Now(), time.Time{}, 0
@@ -634,6 +646,7 @@ func (d *daemon) stopServing(goodbye bool) {
 	d.servingMu.Lock()
 	d.serving = nil
 	d.servingMu.Unlock()
+	d.serve.stopped(d.cfg.STA)
 	d.ra = nil
 	d.m.setCar(car.ID, func(c *carMetric) { c.serving, c.phones, c.signal = false, 0, 0 })
 }
