@@ -119,7 +119,7 @@ The car hands out IPv4 with no router and no DNS, and sends no router advertisem
 - **Leaves before the link dies, and says goodbye.** Departures here don't fade politely — the signal stays flat and then the link drops. So it leaves on the driver's `tx_failed` rate climbing, which buys about 8 seconds of warning where RSSI gives none. On a real drive: 3 leaves, 3 goodbye RAs, no stranded routes.
 - **Learns its own thresholds.** Fixed dBm can't work here: the box sits behind a cinderblock wall where "parked" and "dying" overlap, and every number moves when a car parks differently or a radio is swapped. Each car's healthy band is learned at runtime, persisted, and re-learned when the world changes.
 - **Recovers a deaf radio.** The AR9271 sometimes stops receiving while reporting itself healthy. A run of empty scans on a channel that always has neighbours means the radio, not the world, and it gets rebuilt without disturbing the other car.
-- **Caps its own traffic to the car** so it cannot take CarPlay down with it (see above). HTB with a short queue, per car, off by default.
+- **Caps its own traffic to the car** so it cannot take CarPlay down with it (see above). HTB with a short queue, per car, off by default — or `rate = auto`, which tunes the cap from the p95 latency to the phone and learns it per car ([docs/bandwidth.md](docs/bandwidth.md)).
 - **Reaches IPv4-only hosts** through DNS64 + NAT64: the public IPv4 internet, plus named private hosts by allowlist. Private ranges are rejected by range rather than by enumeration, so opening the internet did not open the home LAN.
 - **Stops scanning on a channel it is already serving.** With a radio per car and both cars on channel 11, the idle radio was probing the live link's channel every second from an antenna inches away. It now backs off eightfold while a sibling serves — a backoff, not a halt, or a second car would never be found.
 - **Records both sides of a drive.** `carrecon` runs in the car in monitor mode, so a departure can be reconstructed from the air rather than only from the box's point of view.
@@ -183,6 +183,7 @@ Full roadmap, acceptance criteria and open items: **[docs/status.md](docs/status
 | [docs/usb-radios.md](docs/usb-radios.md) | One radio per car: two AR9271 dongles, stable naming, the traps |
 | [docs/kernel-modules.md](docs/kernel-modules.md) | Building modules the vendor kernel left out (TUN, ath9k) |
 | [docs/ipv4-options.md](docs/ipv4-options.md) | Reaching IPv4-only hosts: DNS64 + NAT64, and why a plain DNS relay can't work |
+| [docs/bandwidth.md](docs/bandwidth.md) | What CarPlay needs, what is left for us, and the auto-rate controller — with the test to run on both cars |
 | [docs/ap-signalling.md](docs/ap-signalling.md) | Could a beacon remove the *Use For Internet* tap? Staged, gated, unmeasured |
 | [docs/ipv6-route.md](docs/ipv6-route.md) | The IPv6 design and the permanent-box recipe |
 | [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | Lab telemetry + fast connect/leave/reconnect (EnGenius OpenWrt) |
@@ -194,6 +195,7 @@ Full roadmap, acceptance criteria and open items: **[docs/status.md](docs/status
 | `carrecon/`, `tbeam/` | In-car recorder and the GPS/IMU beacon that timestamps a drive |
 | `emu/` | Emulator: OpenWrt image, `emu.sh`, Go agent and harness |
 | `recon/ieaudit/` | Decoder/validator for the Interworking and Apple Device elements |
+| `scripts/rate-trial.sh` | Steps a car link through rates and records loaded latency, drops and your audio verdict |
 | `test-ap/`, `scripts/ap-signal-test.sh` | Controlled hostapd AP for the signalling experiment |
 | `ios/CarNetProbe` | iPhone diagnostics app |
 | `scripts/poc-linux.sh` | The one-shot setup on Linux (`ie`, `up`, `capture`, `status`, `down`) |

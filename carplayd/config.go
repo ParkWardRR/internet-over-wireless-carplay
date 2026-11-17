@@ -13,21 +13,24 @@ import (
 
 // Car is one car's CarPlay network and how we treat it.
 type Car struct {
-	ID       string       // "A", "B": names the [car X] section
-	SSID     string       // e.g. "BMW00001 CarPlay"
-	PSK      string       // 10 characters on the NBT EVO
-	Channel  int          // 2.4 GHz channel number
-	BSSID    string       // optional: only join this AP
-	Prefix   netip.Prefix // the ULA /64 we advertise on this car's network
-	Join     int          // dBm: join when the car is at least this strong
-	Leave    int          // dBm: leave when weaker than this for LeaveFor
-	Rejoin   int          // dBm: after leaving, rejoin only at least this strong
-	Priority int          // higher wins when both cars are seen
-	Rate     string       // tc egress rate cap on this car's link ("2mbit"); "" = unshaped
-	Drop     int          // dB: also leave when the signal falls this far below where it sat 5-20 s ago (0 = off)
-	FailRate int          // tx_failed increments per second that mean the link is dying (0 = off)
-	Phy      string       // the wiphy this car is served on; cars sharing one take turns
-	STA      string       // the STA netdev on that wiphy
+	ID       string        // "A", "B": names the [car X] section
+	SSID     string        // e.g. "BMW00001 CarPlay"
+	PSK      string        // 10 characters on the NBT EVO
+	Channel  int           // 2.4 GHz channel number
+	BSSID    string        // optional: only join this AP
+	Prefix   netip.Prefix  // the ULA /64 we advertise on this car's network
+	Join     int           // dBm: join when the car is at least this strong
+	Leave    int           // dBm: leave when weaker than this for LeaveFor
+	Rejoin   int           // dBm: after leaving, rejoin only at least this strong
+	Priority int           // higher wins when both cars are seen
+	Rate     string        // tc egress rate cap on this car's link ("2mbit", "auto"); "" = unshaped
+	RateMin  string        // auto mode: never shape below this
+	RateMax  string        // auto mode: never shape above this
+	RateRTT  time.Duration // auto mode: the loaded p95 round-trip ceiling to steer by
+	Drop     int           // dB: also leave when the signal falls this far below where it sat 5-20 s ago (0 = off)
+	FailRate int           // tx_failed increments per second that mean the link is dying (0 = off)
+	Phy      string        // the wiphy this car is served on; cars sharing one take turns
+	STA      string        // the STA netdev on that wiphy
 }
 
 // Freq returns the 2.4 GHz centre frequency in MHz, or 0 when the channel is
@@ -189,6 +192,37 @@ func parseConfig(r io.Reader) (Config, error) {
 		}
 		if !(c.Rejoin >= c.Join && c.Join > c.Leave) {
 			return cfg, fmt.Errorf("car %s: want rejoin >= join > leave (hysteresis), got %d/%d/%d", c.ID, c.Rejoin, c.Join, c.Leave)
+		}
+		// Auto-rate bounds. The defaults are deliberately narrow around the one
+		// value that was actually measured on a car (2 Mbit/s held 120 s with
+		// no disconnect): the floor still carries audio and maps, and the
+		// ceiling stays well under the ~3.8 Mbit/s where the head unit broke.
+		if c.Rate == "auto" {
+			if c.RateMin == "" {
+				c.RateMin = "512kbit"
+			}
+			if c.RateMax == "" {
+				c.RateMax = "6mbit"
+			}
+			if c.RateRTT == 0 {
+				c.RateRTT = 150 * time.Millisecond
+			}
+			lo, err := parseRateKbit(c.RateMin)
+			if err != nil {
+				return cfg, fmt.Errorf("car %s: rate_min: %w", c.ID, err)
+			}
+			hi, err := parseRateKbit(c.RateMax)
+			if err != nil {
+				return cfg, fmt.Errorf("car %s: rate_max: %w", c.ID, err)
+			}
+			if lo >= hi {
+				return cfg, fmt.Errorf("car %s: rate_min (%s) must be below rate_max (%s)", c.ID, c.RateMin, c.RateMax)
+			}
+			if c.RateRTT < 20*time.Millisecond {
+				return cfg, fmt.Errorf("car %s: rate_rtt %v is below the link's own idle round trip, so the controller could never be satisfied", c.ID, c.RateRTT)
+			}
+		} else if c.RateMin != "" || c.RateMax != "" || c.RateRTT != 0 {
+			return cfg, fmt.Errorf("car %s: rate_min/rate_max/rate_rtt only mean anything with rate = auto", c.ID)
 		}
 		// One radio per car serves them all at once; cars sharing a radio take
 		// turns on it, which is what a single-radio box has always done.
@@ -405,7 +439,17 @@ func setCar(c *Car, k, v string) error {
 	case "priority":
 		c.Priority = atoi(v)
 	case "rate":
-		c.Rate, err = normalizeRate(v)
+		if strings.EqualFold(strings.TrimSpace(v), "auto") {
+			c.Rate = "auto"
+		} else {
+			c.Rate, err = normalizeRate(v)
+		}
+	case "rate_min":
+		c.RateMin, err = normalizeRate(v)
+	case "rate_max":
+		c.RateMax, err = normalizeRate(v)
+	case "rate_rtt":
+		c.RateRTT, err = time.ParseDuration(v)
 	case "drop":
 		c.Drop = atoi(v)
 	case "phy":

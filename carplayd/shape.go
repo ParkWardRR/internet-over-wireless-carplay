@@ -105,6 +105,42 @@ func normalizeRate(v string) (string, error) {
 	return "", fmt.Errorf("rate %q needs a unit: bit, kbit, mbit or gbit (not mbps -- that is bytes and would be 8x too large)", v)
 }
 
+// parseRateKbit turns a validated rate string into kbit, for the arithmetic the
+// auto-rate controller does. Kept next to normalizeRate so the two cannot
+// disagree about what a unit means -- the whole reason "mbps" is rejected.
+func parseRateKbit(v string) (int, error) {
+	norm, err := normalizeRate(v)
+	if err != nil {
+		return 0, err
+	}
+	if norm == "" {
+		return 0, nil
+	}
+	// Longest suffix first, and a slice not a map: with map iteration order,
+	// "2000kbit" could match "bit" first and parse "2000k" as a float. That bug
+	// was random -- it depended on Go's map ordering from run to run.
+	for _, u := range []struct {
+		unit string
+		mult float64
+	}{{"gbit", 1e6}, {"mbit", 1e3}, {"kbit", 1}, {"bit", 1e-3}} {
+		unit, mult := u.unit, u.mult
+		num, ok := strings.CutSuffix(norm, unit)
+		if !ok {
+			continue
+		}
+		f, err := strconv.ParseFloat(num, 64)
+		if err != nil {
+			return 0, fmt.Errorf("rate %q: %w", v, err)
+		}
+		kbit := int(f * mult)
+		if kbit < 1 {
+			return 0, fmt.Errorf("rate %q is under 1 kbit", v)
+		}
+		return kbit, nil
+	}
+	return 0, fmt.Errorf("rate %q has no recognised unit", v)
+}
+
 // shapeStats is what the daemon logs so the cap can be judged from the events
 // file rather than assumed to be working. Non-zero drops and overlimits are the
 // evidence that traffic really was exceeding the cap -- that is, that the cap is

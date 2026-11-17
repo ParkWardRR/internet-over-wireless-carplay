@@ -106,6 +106,11 @@ type profile struct {
 	Quiet    ewma      `json:"quiet_fail"`  // tx_failed/s while the link was working
 	Outliers int       `json:"-"`           // consecutive readings outside the band
 	Updated  time.Time `json:"updated"`
+	// Auto-rate, learned the same way the thresholds are: what this car's link
+	// actually tolerated, not what a config file guessed. RateCeil is set only
+	// after a link loss at a healthy signal and is never raised automatically.
+	RateKbit int `json:"rate_kbit,omitempty"`
+	RateCeil int `json:"rate_ceil_kbit,omitempty"`
 }
 
 // observe records one poll. healthy says whether the link was working at the
@@ -298,4 +303,59 @@ func (ps *profiles) save() error {
 		return err
 	}
 	return os.Rename(tmp, ps.path)
+}
+
+// --- auto-rate accessors ----------------------------------------------------
+//
+// Separate from Observe because they are set by a different loop on a different
+// clock: the thresholds learn from every poll, the rate from a latency decision
+// every 15 s.
+
+func (ps *profiles) rate(id string) int {
+	if ps == nil {
+		return 0
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if p := ps.Cars[id]; p != nil {
+		return p.RateKbit
+	}
+	return 0
+}
+
+func (ps *profiles) rateCeil(id string) int {
+	if ps == nil {
+		return 0
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if p := ps.Cars[id]; p != nil {
+		return p.RateCeil
+	}
+	return 0
+}
+
+func (ps *profiles) setRate(id string, kbit int) {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	p := ps.get(id)
+	p.RateKbit, p.Updated = kbit, time.Now()
+	ps.mu.Unlock()
+	_ = ps.save()
+}
+
+func (ps *profiles) setRateCeil(id string, kbit int) {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	p := ps.get(id)
+	p.RateCeil, p.Updated = kbit, time.Now()
+	if p.RateKbit > kbit {
+		p.RateKbit = kbit
+	}
+	ps.mu.Unlock()
+	_ = ps.save()
 }

@@ -102,6 +102,20 @@ priority = 1
 # Off by default -- a different head unit may not need it, and a silent throttle
 # is worse than none. Watch the `shaped` event and nonzero HTB drops to confirm.
 #rate = 2mbit
+#
+# rate = auto measures instead of guessing: it steers the cap by the p95
+# round-trip time to the phone, sampled only while we are actually sending,
+# because at idle the phone's power save puts round trips at 4 ms one second and
+# 2051 ms the next and a controller that believed that would ratchet to the
+# floor for nothing. Down 30%, up 25%, and up only under demonstrated demand --
+# too high can drop CarPlay, too low only costs download speed. Starts at
+# 2 Mbit/s (the one value measured safe), learns per car into learned.json, and
+# lowers a persistent ceiling if the link is ever lost at a healthy signal.
+# See docs/bandwidth.md.
+#rate = auto
+#rate_min = 512kbit
+#rate_max = 6mbit
+#rate_rtt = 150ms
 
 [car B]
 ssid = BMW00002 CarPlay

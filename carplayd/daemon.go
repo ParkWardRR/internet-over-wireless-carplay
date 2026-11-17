@@ -48,6 +48,8 @@ type daemon struct {
 	blocked      []netip.Prefix // what the firewall currently keeps phones from
 	prof         *profiles      // learned per-car thresholds (shared)
 	serve        *serveState    // which radio serves which channel (shared)
+	rateKbit     int            // shaper rate in force on this link (auto mode)
+	lastShape    shapeStats     // previous shaper counters, for the demand signal
 	savedProf    time.Time
 	scans        scanWatch // empty-scan counter behind the radio stall watchdog
 	// Whether iOS has validated this car network for internet use, which a
@@ -631,10 +633,17 @@ func (d *daemon) startServing(car *Car) {
 	}
 	// Before any RA goes out: the cap exists to stop our own traffic taking
 	// the head unit's CarPlay session down with it (see shape.go).
-	if err := applyShaping(d.cfg.STA, car.Rate, run); err != nil {
+	rate := d.effectiveRate(car)
+	if err := applyShaping(d.cfg.STA, rate, run); err != nil {
 		d.ev("error", "shape", err.Error())
-	} else if car.Rate != "" {
-		d.ev("shaped", car.ID, "rate="+car.Rate, "leaf="+strconv.Itoa(shapeLeafPackets)+"p")
+	} else if rate != "" {
+		d.rateKbit, _ = parseRateKbit(rate)
+		d.lastShape = shapeStats{}
+		mode := "fixed"
+		if car.Rate == "auto" {
+			mode = fmt.Sprintf("auto target=%v min=%s max=%s", car.RateRTT, car.RateMin, car.RateMax)
+		}
+		d.ev("shaped", car.ID, "rate="+rate, "leaf="+strconv.Itoa(shapeLeafPackets)+"p", "mode="+mode)
 	}
 	d.freshHealth()
 	id := car.ID
@@ -679,6 +688,7 @@ func (d *daemon) stopServing(goodbye bool) {
 		d.ra.close()
 	}
 	clearShaping(d.cfg.STA, car.Rate, run)
+	d.rateKbit, d.lastShape = 0, shapeStats{}
 	run("ip", "-6", "addr", "del", car.Prefix.Addr().Next().String()+"/64", "dev", d.cfg.STA)
 	d.servingMu.Lock()
 	d.serving = nil
@@ -1001,6 +1011,8 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 	hunt := time.NewTicker(d.cfg.Hunt)
 	pollT := time.NewTicker(d.cfg.Poll)
 	healthT := time.NewTicker(d.cfg.HealthEvery)
+	rateT := time.NewTicker(autoRateEvery)
+	defer rateT.Stop()
 	d.linkEv("start", d.freqs())
 	d.hunt()
 	for {
@@ -1028,6 +1040,10 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 					"locally_generated=" + orZero(kv["locally_generated"]), "bssid=" + kv["bssid"]}
 				if d.serving != nil {
 					d.ev("link_lost", append([]string{d.serving.ID, strconv.Itoa(d.lastSig)}, why...)...)
+					// A loss at a healthy signal is the signature of having
+					// overdriven the head unit, not of driving away.
+					lc := d.learned(*d.serving)
+					d.penaliseRate(&lc, d.lastSig, lc.Leave)
 					d.m.inc("link_lost")
 					d.stopServing(false)
 				} else {
@@ -1045,6 +1061,8 @@ func (d *daemon) loop(stop <-chan os.Signal) {
 			d.hunt()
 		case <-pollT.C:
 			d.poll()
+		case <-rateT.C:
+			d.tuneRate()
 		case <-healthT.C:
 			if !d.owner {
 				continue
