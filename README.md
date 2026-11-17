@@ -1,12 +1,3 @@
-<p align="center">
-  <img src="docs/img/tap-once.svg" width="900"
-       alt="You have to tap it once: Settings → Wi-Fi → the car's network → Check For Internet Access, then turn on Use For Internet.">
-</p>
-
-<p align="center">
-  <b>You have to tap it once:</b> Settings → Wi-Fi → the car's network → <b>Check For Internet Access</b>, then turn on <b>Use For Internet</b>.
-</p>
-
 # internet-over-wireless-carplay
 
 [![Release](https://img.shields.io/github/v/release/ParkWardRR/internet-over-wireless-carplay?label=release&color=blue)](https://github.com/ParkWardRR/internet-over-wireless-carplay/releases)
@@ -67,6 +58,19 @@ It is the one thing that catches everyone out, so it is worth being blunt about.
 iOS gives a CarPlay network the lowest possible priority. It gets a limited route that background services use and **your apps ignore**. The box can be working perfectly and Maps will still fail. That is exactly what happened on one instrumented drive: 1.36 MB moved through the box and not one user-facing app touched it.
 
 So you tap *Check For Internet Access*, then *Use For Internet*, and it works.
+
+<p align="center">
+  <img src="docs/img/wifi-carplay-network.png" alt="iPhone Wi-Fi settings showing the car's CarPlay network joined, with the info button beside it." width="330">
+  &nbsp;&nbsp;
+  <img src="docs/img/use-for-internet.png" alt="The Use For Internet switch on a CarPlay network, with Apple's explanation underneath." width="330">
+</p>
+
+**Left:** the car's CarPlay network in Settings → Wi-Fi. Tap the **ⓘ** beside it.
+**Right:** the switch, with Apple's own wording — *"your iPhone will also use your vehicle's hotspot to access the internet. If the hotspot loses connectivity, the iPhone will use its cellular connection."*
+
+That wording is worth reading carefully: iOS is describing **the car acting as a hotspot**, which on these head units it is not. What the box does is make the claim true.
+
+These two screenshots are from other vehicles — an MG, and a head unit that names its network `CarPlay_e712` — not the BMWs this project was measured on. They are here because the screen is the same wherever you find it, and because they are evidence the switch is **not BMW-specific**. Everything else in this README is scoped to two NBT EVO head units; this is not.
 
 **After that first tap, iOS mostly re-checks by itself.** Across sessions where the car was gone for 15–29 minutes, the phone came back on its own 4–24 seconds after the box started serving. Nobody taps that fast.
 
