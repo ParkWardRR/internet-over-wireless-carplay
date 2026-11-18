@@ -66,17 +66,14 @@ iOS gives a CarPlay network the lowest possible priority. It gets a limited rout
 So you tap *Check For Internet Access*, then *Use For Internet*, and it works.
 
 <p align="center">
-  <img src="docs/img/wifi-carplay-network.png" alt="iPhone Wi-Fi settings showing the car's CarPlay network joined, with the info button beside it." width="330">
+  <img src="docs/img/use-for-internet-off.png" alt="The Use For Internet switch off on the car's CarPlay network page, with Apple's explanation underneath." width="300">
   &nbsp;&nbsp;
-  <img src="docs/img/use-for-internet.png" alt="The Use For Internet switch on a CarPlay network, with Apple's explanation underneath." width="330">
+  <img src="docs/img/use-for-internet-on.png" alt="The same page with Use For Internet turned on; the status bar now shows the Wi-Fi glyph instead of cellular bars." width="300">
 </p>
 
-**Left:** the car's CarPlay network in Settings → Wi-Fi. Tap the **ⓘ** beside it.
-**Right:** the switch, with Apple's own wording — *"your iPhone will also use your vehicle's hotspot to access the internet. If the hotspot loses connectivity, the iPhone will use its cellular connection."*
+The same page before and after the tap, on the F32 (SSID digits are the end of the VIN, so they are redacted). The status bar is the quickest tell that it landed: cellular bars on the left, the Wi-Fi glyph on the right.
 
-That wording is worth reading carefully: iOS is describing **the car acting as a hotspot**, which on these head units it is not. What the box does is make the claim true.
-
-These two screenshots are from other vehicles — an MG, and a head unit that names its network `CarPlay_e712` — not the BMWs this project was measured on. They are here because the screen is the same wherever you find it, and because they are evidence the switch is **not BMW-specific**. Everything else in this README is scoped to two NBT EVO head units; this is not.
+Apple's wording under the switch is worth reading carefully — *"your iPhone will also use your vehicle's hotspot to access the internet"*. iOS is describing **the car acting as a hotspot**, which on these head units it is not. What the box does is make the claim true.
 
 **After that first tap, iOS mostly re-checks by itself.** Across sessions where the car was gone for 15–29 minutes, the phone came back on its own 4–24 seconds after the box started serving. Nobody taps that fast.
 
@@ -144,6 +141,12 @@ flowchart LR
 ```
 
 The car hands out IPv4 with no router and no DNS, and sends no router advertisements of its own. So the box doesn't fight it: it leaves IPv4 alone and becomes the only IPv6 router on the link, advertising a ULA prefix, itself as the route, and a DNS server, then NATs out to the house. The phone picks that up with plain SLAAC. Nothing is configured on the phone beyond the one switch.
+
+<p align="center">
+  <img src="docs/img/ipv6-route.png" alt="The phone's network detail for the car: an IPv4 address with an empty Router field, and below it an IPv6 address and an IPv6 router." width="300">
+</p>
+
+The phone's own view of that, in the car: an IPv4 address from the head unit with the **Router field empty** — that is the car's DHCP, offering no way out — and underneath it the IPv6 address and router the box advertised. Addresses redacted; the IPv6 router is the box's link-local.
 
 ## What the box does
 
@@ -244,7 +247,7 @@ There is also a plain-language write-up of **[what was learned about wireless Ca
 
 ## Rules
 
-- **Never commit** a car's PSK, VIN, SSID digits (they are the end of the VIN), MACs or keys. They go in `secrets/`, which is gitignored — captures included. A pre-commit hook blocks the known values; it has caught a real one twice.
+- **Never commit** a car's PSK, VIN, SSID digits (they are the end of the VIN), MACs or keys. They go in `secrets/`, which is gitignored — captures included. A pre-commit hook blocks the known values; it has caught a real one twice. It cannot read a screenshot, so run those through `scripts/redact-screenshot.sh` first — it mosaics the regions you name rather than blurring them, because a blur over known text can be undone.
 - **Scanning your own refs is not enough.** This repo published unscrubbed history twice: once in the tree, and once because a rewrite force-pushed `main` but left two release tags pointing into the old history. Check what the *remote* serves.
 - **Car work is read-only** unless a step says otherwise. No coding, no flashing.
 - **Log every test** in [docs/test-log.md](docs/test-log.md): date, what ran, what happened, what changed as a result. A claim with no row is not a result.
