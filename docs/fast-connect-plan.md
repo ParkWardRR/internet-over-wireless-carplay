@@ -1,5 +1,12 @@
 # Plan: lab telemetry, then fast connect / disconnect / reconnect
 
+> **Where this stands (2026-11-18).** The functional half of this plan is built and
+> running: `carplayd` picks either car up in well under a second, leaves with a
+> goodbye, and comes back fast ([status.md](status.md)). What is still unbuilt is the
+> **lab rig** described here — the EnGenius box, the monitor vif, the second-by-second
+> timeline — and that is why the file is kept. Read it as the measurement method, not
+> as a description of the production path.
+
 Two-car design and the controller (`carplayd`): [two-cars.md](two-cars.md).
 
 P2 proved the route ([findings.md](findings.md)). This plan covers the next two phases:

@@ -553,7 +553,8 @@ func assertGateFail(t *testing.T, err error, out, want string) {
 
 // beacon builds a management frame: subtype 8 (beacon) or 5 (probe response).
 func beacon(subtype int, bssid []byte, ssid string, extraIEs []byte) []byte {
-	f := []byte{byte(subtype<<4) | 0x00, 0x00, 0, 0}
+	// Frame control: type 0 (management) in bits 2-3, subtype in bits 4-7.
+	f := []byte{byte(subtype << 4), 0x00, 0, 0}
 	f = append(f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff) // A1
 	f = append(f, bssid...)                           // A2
 	f = append(f, bssid...)                           // A3

@@ -5,5 +5,7 @@ captures/
 *.pcapng
 ios/CarNetProbe/*.xcodeproj/
 emu/out/
+# scripts/release.sh writes the built binaries and SHA256SUMS here.
+/out/
 .nimbalyst/
 node_modules/

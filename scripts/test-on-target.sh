@@ -29,7 +29,7 @@ rsync -a --delete --exclude .git/ --exclude secrets/ --exclude out/ ./ "$BUILD:$
 ssh "$BUILD" "cd $REMOTE && scripts/release.sh testbin"
 
 fail=0
-for name in carplayd carrecon carnetbridge; do
+for name in carplayd carrecon; do
 	[ "$WANT" = all ] || [ "$WANT" = "$name" ] || continue
 	bin=$name.test-linux-arm64
 	ssh "$BUILD" "cat $REMOTE/out/$bin" | ssh "$TARGET" "cat > '$DEST/$bin' && chmod +x '$DEST/$bin'"

@@ -29,7 +29,7 @@ The link ends up **dual-stack**: the car's own IPv4 for CarPlay, and our IPv6-on
 ## What the box actually does
 
 - **Serves whichever configured car appears**, one daemon per radio, with a firewall table per car link that permits the internet and nothing else: not the box's own services, not your home network, not the other car.
-- **Leaves before the link dies, and says goodbye.** Departures here do not fade politely — the signal stays flat and then the link drops. So it leaves on the driver's transmit-failure rate climbing, which buys about 8 seconds of warning where signal strength gives none.
+- **Leaves before the link dies, and says goodbye.** Departures here do not fade politely — the signal stays flat and then the link drops. So it also leaves on the driver's transmit-failure rate climbing, which buys about 8 seconds of warning where signal strength gives none. **On the USB adapters in use now that counter is never implemented**, so only the signal rules are actually live — see [[Design Decisions]] and [[Open Questions]].
 - **Learns its own thresholds.** Fixed signal numbers cannot work: the box sits behind a wall where "parked" and "dying" overlap, and every number moves when a car parks differently. Each car's healthy band is learned at runtime and persisted. A learned threshold may make the box *more patient* than configured, never more eager — see [[Design Decisions]].
 - **Caps its own traffic** so it cannot take CarPlay down. See [[Bandwidth and Airtime]].
 - **Reaches IPv4-only hosts** through DNS64 + NAT64, since our path is IPv6-only.

@@ -117,11 +117,11 @@ Yes, on a real car, measured — most recently **44,327 packets / 6.2 MB** forwa
 
 On 2026-11-16 the F32 and the F22 were served simultaneously for **1 minute 53 seconds**: two routes up, a prefix each, a phone attached to each, on independent radios. Both sessions ended with the head units deauthenticating at −60 and −53 dBm, which is what they send when the car is switched off.
 
-The evidence is not equally strong for both, and it is worth saying which is which. The F22 has validated **11 times** across three days. The F32 has validated **once**, on 2026-11-16, eleven seconds before that session ended — real, and thin.
+The evidence is not equally strong for both, and it is worth saying which is which. The F22 has validated **11 times** across three days. The F32 has validated **twice** — 2026-11-16, and again on 2026-11-18, that time **3.6 seconds** after the box started serving. Both F32 sessions ended with the car being switched off, at 11 s and 44 s. Real, and short.
 
-What is still open is narrower again: **both cars validated at the same time.** In the 1m53s window where both were served, neither phone validated, so only background traffic moved (386 kB and 216 kB). Each car works; both working *simultaneously* has not been shown. Nor has a long session on the F32.
+What is still open is narrower again: **both phones validated at the same time.** In the 1m53s window where both were served, neither phone validated, so only background traffic moved (386 kB and 216 kB). Each car works; both working *simultaneously* has not been shown — nor has a session on the F32 that outlasts a minute.
 
-**NAT64 was quietly broken until 2026-11-16.** It is what lets the phone reach IPv4-only hosts over an IPv6-only path, and it only ever worked for three hardcoded addresses: the synthesised prefix sits inside `fc00::/7`, which the isolation rules reject, and the only exceptions were the named home hosts. So every IPv4-only *public* site was refused while DNS handed the phone a perfectly routable-looking address for it — Reddit, which has no native IPv6, is how it surfaced. Fixed by rejecting the synthesised form of each private IPv4 range and then permitting the rest. Deployed; **not yet confirmed by a phone**, so the box counts it (`nat64_public`) rather than assuming.
+**NAT64 was quietly broken until 2026-11-16, and now carries real traffic.** It is what lets the phone reach IPv4-only hosts over an IPv6-only path, and it only ever worked for three hardcoded addresses: the synthesised prefix sits inside `fc00::/7`, which the isolation rules reject, and the only exceptions were the named home hosts. So every IPv4-only *public* site was refused while DNS handed the phone a perfectly routable-looking address for it — Reddit, which has no native IPv6, is how it surfaced. Fixed by rejecting the synthesised form of each private IPv4 range and then permitting the rest. Since that fix the translator has carried **29.5 MB in 51,215 packets with no errors and no drops**, against three outbound packets in its entire life before it.
 
 Full status, per car, with dates: **[docs/status.md](docs/status.md)**. Every test ever run: **[docs/test-log.md](docs/test-log.md)**.
 
@@ -151,7 +151,7 @@ The phone's own view of that, in the car: an IPv4 address from the head unit wit
 ## What the box does
 
 - **Serves whichever configured car turns up**, one daemon per radio, with an nftables table per car link that permits the internet and nothing else: not the box, not the home LAN, not the other car.
-- **Leaves before the link dies, and says goodbye.** Departures here don't fade politely — the signal stays flat and then the link drops. So it leaves on the driver's `tx_failed` rate climbing, which buys about 8 seconds of warning where RSSI gives none. On a real drive: 3 leaves, 3 goodbye RAs, no stranded routes.
+- **Leaves before the link dies, and says goodbye.** Departures here don't fade politely — the signal stays flat and then the link drops. So it also leaves on the driver's `tx_failed` rate climbing, which buys about 8 seconds of warning where RSSI gives none: 3 leaves, 3 goodbye RAs, no stranded routes on a real drive. **That rule is asleep on the current radios** — `ath9k_htc` never implements the counter, so only the signal rules are live until something replaces it ([docs/status.md](docs/status.md), open item 20).
 - **Learns its own thresholds.** Fixed dBm can't work here: the box sits behind a cinderblock wall where "parked" and "dying" overlap, and every number moves when a car parks differently or a radio is swapped. Each car's healthy band is learned at runtime, persisted, and re-learned when the world changes.
 - **Recovers a deaf radio.** The AR9271 sometimes stops receiving while reporting itself healthy. A run of empty scans on a channel that always has neighbours means the radio, not the world, and it gets rebuilt without disturbing the other car.
 - **Caps its own traffic to the car** so it cannot take CarPlay down with it (see above). HTB with a short queue, per car, off by default — or `rate = auto`, which tunes the cap from the p95 latency to the phone and learns it per car ([docs/bandwidth.md](docs/bandwidth.md)).
@@ -160,19 +160,6 @@ The phone's own view of that, in the car: an IPv4 address from the head unit wit
 - **Records both sides of a drive.** `carrecon` runs in the car in monitor mode, so a departure can be reconstructed from the air rather than only from the box's point of view.
 
 See [docs/findings.md](docs/findings.md) for what the measurements showed — including a leading hypothesis the data killed.
-
-## Where this stands, per car
-
-Measured on the box and the phone, not inferred.
-
-| | F22 M240i (`car B`) | F32 (`car A`) |
-|---|---|---|
-| **Box joins the car's CarPlay Wi-Fi** | ✅ repeatedly, 2026-11-14, on its own USB radio | ✅ 2026-11-02/03, on the old shared radio |
-| **Phone gets a route and real app traffic** | ✅ **44,327 packets / 6.2 MB forwarded**, 5 × `validated` | ✅ 2026-11-02, Maps search + routing on CarPlay |
-| **On the current two-radio build** | ✅ in service, **validated 11×** over three days | ✅ served and **validated once** (2026-11-16), plus 1m53s alongside the F22 |
-| **Clean departures (goodbye before the link dies)** | ✅ 3/3 on a real drive | ⚠️ an early departure stranded a route; fixed, re-tested on the F22 only |
-
-> **Resolve cars by SSID, never by letter.** `carplayd.conf`'s `[car A]` is the F32 and `[car B]` is the F22. `secrets/carplay.env` uses the opposite convention.
 
 ## Key facts
 
@@ -215,6 +202,21 @@ There is also a plain-language write-up of **[what was learned about wireless Ca
 
 ## Repo
 
+**Code.** Every script carries a header comment saying what it is for; `scripts/` is the whole toolbox, of which `carplay-box.sh` and `poc-linux.sh` are the two you run yourself.
+
+| Path | What |
+|---|---|
+| `carplayd/` | The Go controller that runs in production: one daemon per radio |
+| `recon/carrecon/` | In-car passive recorder, so a drive can be reconstructed from the air |
+| `recon/airtime/` | Per-frame airtime accounting from inside the car. `-report` analyses a run |
+| `recon/ieaudit/` | Decoder/validator for the Interworking and Apple Device elements |
+| `emu/` | The box emulated in hwsim: OpenWrt image, `emu.sh`, Go agent and harness |
+| `ios/CarNetProbe` | iPhone diagnostics app |
+| `test-ap/` | Controlled hostapd AP for the signalling experiment |
+| `wiki/` | Source of the GitHub wiki; `scripts/wiki-sync.sh` publishes it, and refuses if the scrub check hits |
+
+**Docs.**
+
 | Path | What |
 |---|---|
 | [docs/status.md](docs/status.md) | Status, roadmap, open items, risks |
@@ -224,28 +226,18 @@ There is also a plain-language write-up of **[what was learned about wireless Ca
 | [docs/usb-radios.md](docs/usb-radios.md) | One radio per car: two AR9271 dongles, stable naming, the traps |
 | [docs/kernel-modules.md](docs/kernel-modules.md) | Building modules the vendor kernel left out (TUN, ath9k) |
 | [docs/ipv4-options.md](docs/ipv4-options.md) | Reaching IPv4-only hosts: DNS64 + NAT64, and why a plain DNS relay can't work |
-| [docs/bandwidth.md](docs/bandwidth.md) | What CarPlay needs, what is left for us, and the auto-rate controller — with the test to run on both cars |
-| [docs/ap-signalling.md](docs/ap-signalling.md) | Could a beacon remove the *Use For Internet* tap? Staged, gated, unmeasured |
+| [docs/bandwidth.md](docs/bandwidth.md) | What CarPlay needs, what is left for us, and the auto-rate controller |
 | [docs/ipv6-route.md](docs/ipv6-route.md) | The IPv6 design and the permanent-box recipe |
-| [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | Lab telemetry + fast connect/leave/reconnect (EnGenius OpenWrt) |
+| [docs/recon-box.md](docs/recon-box.md), [docs/drive-runbook.md](docs/drive-runbook.md) | Recording a drive from inside the car, and the runbook for doing it |
 | [docs/emulator.md](docs/emulator.md), [docs/emulator-results.md](docs/emulator-results.md) | The box emulated in hwsim; stock vs carplayd numbers |
 | [docs/iphone-diagnostics.md](docs/iphone-diagnostics.md) | rvictl capture, iOS logs, CarNet Probe |
-| [docs/openwrt-box.md](docs/openwrt-box.md) | The OpenWrt replacement box |
+| [docs/ap-signalling.md](docs/ap-signalling.md) | Could a beacon remove the *Use For Internet* tap? Staged, gated, unmeasured |
+| [docs/openwrt-box.md](docs/openwrt-box.md), [docs/fast-connect-plan.md](docs/fast-connect-plan.md) | The EnGenius OpenWrt box that is meant to replace the SBC, and its lab plan |
 | [docs/review-response.md](docs/review-response.md) | External reviews: findings, changes, evidence |
-| `carplayd/` | The Go controller that runs in production |
-| `carrecon/`, `tbeam/` | In-car recorder and the GPS/IMU beacon that timestamps a drive |
-| `emu/` | Emulator: OpenWrt image, `emu.sh`, Go agent and harness |
-| `recon/ieaudit/` | Decoder/validator for the Interworking and Apple Device elements |
-| `wiki/`, `scripts/wiki-sync.sh` | Source of the GitHub wiki, and the publisher that refuses to push if the scrub check hits |
-| `recon/airtime/` | Per-frame airtime accounting from inside the car: what CarPlay costs and what is left. `-report` analyses a run |
-| `scripts/rate-trial.sh` | Steps a car link through rates and records loaded latency, drops and your audio verdict |
-| `test-ap/`, `scripts/ap-signal-test.sh` | Controlled hostapd AP for the signalling experiment |
-| `ios/CarNetProbe` | iPhone diagnostics app |
-| `scripts/poc-linux.sh` | The one-shot setup on Linux (`ie`, `up`, `capture`, `status`, `down`) |
-| `scripts/carplay-box.sh` | Hands-off mode (`install`, `status`, `uninstall`) |
-| `scripts/poc-mac-nat.sh` | The same on a Mac (rtadvd + pf) |
 
 ## Rules
+
+- **Resolve cars by SSID, never by letter.** `carplayd.conf`'s `[car A]` is the F32 and `[car B]` is the F22; `secrets/carplay.env` uses the opposite convention. Letters are an index into a config file, not a name for a car.
 
 - **Never commit** a car's PSK, VIN, SSID digits (they are the end of the VIN), MACs or keys. They go in `secrets/`, which is gitignored — captures included. A pre-commit hook blocks the known values; it has caught a real one twice. It cannot read a screenshot, so run those through `scripts/redact-screenshot.sh` first — it mosaics the regions you name rather than blurring them, because a blur over known text can be undone.
 - **Scanning your own refs is not enough.** This repo published unscrubbed history twice: once in the tree, and once because a rewrite force-pushed `main` but left two release tags pointing into the old history. Check what the *remote* serves.

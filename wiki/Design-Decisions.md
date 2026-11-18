@@ -22,6 +22,8 @@ Departures here do not fade. Measured on a real drive: the signal sat **flat for
 
 The driver's transmit-failure rate was the only advance warning, and it gave about 8 seconds of it. Across hundreds of samples that rate is **bimodal** — low when healthy, high when failing, with nothing in between — so the threshold sits in an empty gap and needs no tuning.
 
+**The decision outlived the hardware it was made on.** That drive used the box's onboard radio. Both cars are now served by USB AR9271 adapters, whose driver reports the transmit-failure counter as permanently zero — so the rule is still in the code, still correct, and cannot fire. Every leave since has come from a signal rule, which is what this section says is insufficient. Replacing the signal is open work; pretending the rule is running is not an option.
+
 ## Capping our own traffic
 
 Because the box can otherwise take CarPlay down — measured, including a head unit that needed a hard reset. See [[Bandwidth and Airtime]].

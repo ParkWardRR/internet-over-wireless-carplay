@@ -90,6 +90,16 @@ and needs no tuning. Leaving on that instead of on signal produced **3 leaves ou
 of 3 with a goodbye sent, and zero `link_lost`**, against the F32's
 `link_lost reason=0` with no goodbye two hours earlier.
 
+**And then the radios changed underneath it** (2026-11-18, measured). Both drives
+above ran on the box's onboard brcmfmac radio. Both cars are now served by USB
+AR9271 dongles, and `ath9k_htc` does not implement `tx_failed` at all — it reads
+0 forever, so the rule cannot fire. The retained logs agree: **8 leaves, every one
+`trend` or `threshold`, none `failing`.** The finding above still stands as a
+finding; what no longer stands is the claim that the box acts on it. Until a
+signal these radios do produce replaces the counter — the MCS rate collapsing to
+the 1.0 Mb/s floor is the obvious candidate, visible on both failed drives —
+departures rest on exactly the rules this section opens by showing cannot fire.
+
 **The airtime hypothesis looks wrong.** It had been the leading explanation: the
 head unit relays the far box's traffic at 1–2 Mb/s and starves CarPlay. Against
 it: CarPlay throughput rose 312 → 1209 kB/s when the box dropped out, which looks
