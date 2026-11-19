@@ -113,7 +113,14 @@ priority = 1
 join = -80
 leave = -85
 rejoin = -77
-drop = 6
+# 2026-11-18: 6 dB was inside the ordinary parked swing at this spot, so the
+# trend rule kept abandoning a car that was sitting right there. Measured that
+# evening: the F32 parked between -50 and -63 (13 dB of normal wander) and the
+# box left 21 s after connecting, "leave A -60 trend base=-51", then could not
+# rejoin because a trend leave demands base-3 = -54 to come back. A real
+# departure from this garage is a cliff, not a fade -- -60 to -81 in three
+# seconds -- so 18 dB still catches it with seconds to spare.
+drop = 18
 rate = $CAR_RATE
 ${CAR_A_PHY:+phy = $CAR_A_PHY}
 ${CAR_A_STA:+sta = $CAR_A_STA}
@@ -126,7 +133,14 @@ prefix = fd5c:ba1e:f32:b::/64
 join = -80
 leave = -85
 rejoin = -77
-drop = 6
+# 2026-11-18: 6 dB was inside the ordinary parked swing at this spot, so the
+# trend rule kept abandoning a car that was sitting right there. Measured that
+# evening: the F32 parked between -50 and -63 (13 dB of normal wander) and the
+# box left 21 s after connecting, "leave A -60 trend base=-51", then could not
+# rejoin because a trend leave demands base-3 = -54 to come back. A real
+# departure from this garage is a cliff, not a fade -- -60 to -81 in three
+# seconds -- so 18 dB still catches it with seconds to spare.
+drop = 18
 rate = $CAR_RATE
 ${CAR_B_PHY:+phy = $CAR_B_PHY}
 ${CAR_B_STA:+sta = $CAR_B_STA}
