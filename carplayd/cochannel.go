@@ -27,11 +27,49 @@ import "sync"
 // the idle radio's supplicant running and stopped. Until that is run, treat the
 // backoff as cost-free insurance rather than a fix.
 
-// cochannelBackoff is how many hunt ticks to skip while a sibling radio is
-// serving a car on the same channel. 8 trades about 7 s of extra discovery
-// latency for the second car against an eightfold cut in interference with the
-// first car's live session.
+// cochannelBackoff is the default number of hunt ticks to skip while a sibling
+// radio is serving a car on the same channel. 8 trades about 7 s of extra
+// discovery latency for the second car against an eightfold cut in
+// interference with the first car's live session.
+//
+// Configurable as `cochannel_backoff` since 2026-11-25, because this is the
+// only lever the box has on a problem that is otherwise entirely the head
+// unit's, and testing it had meant a rebuild and a redeploy.
+//
+// What prompted it: on 2026-11-25 the F32 lost its link five times, every one
+// preceded by CTRL-EVENT-BEACON-LOSS at -56..-62 dBm with tx_failed=0 and full
+// 65 Mb/s rates -- the AP stopped beaconing while our link to it was perfect.
+// One of those outages lasted nearly three minutes, with neither radio able to
+// see the AP. That is the head unit's doing and no setting here changes it.
+// But the co-channel hypothesis in this file is still the one untested way the
+// box could be *contributing*: carb sweeps channel 11, from an antenna inches
+// away, while cara serves a live CarPlay session on it. Raising this number
+// shrinks that duty cycle.
+//
+// STILL UNMEASURED. Raising it is a cheap experiment, not a known fix. The way
+// to judge it is to count beacon-loss events per car per day before and after:
+//
+//	journalctl -u carplayd --since '7 days ago' | grep -c 'cara CTRL-EVENT-BEACON-LOSS'
+//
+// For reference, the week to 2026-11-25: cara 5 beacon losses and 5 of them
+// killed the link; carb 153 beacon losses and only 2 killed it. If the
+// backoff matters, cara's count should fall. If it does not move, the blame is
+// the head unit's alone and this should go back to 8.
 const cochannelBackoff = 8
+
+// backoffTicks is the configured backoff, or the default when unset. A value
+// of 1 disables the backoff (every tick hunts); anything below 1 is treated as
+// unset rather than as "never hunt", because never discovering the second car
+// is the one outcome this must not produce by accident.
+func backoffTicks(cfg Config) int {
+	if cfg.CochannelBackoff > 1 {
+		return cfg.CochannelBackoff
+	}
+	if cfg.CochannelBackoff == 1 {
+		return 1
+	}
+	return cochannelBackoff
+}
 
 // serveState records which channel each radio is currently serving on. Every
 // link in the process shares one, the same way they share the metrics registry
@@ -97,12 +135,15 @@ func channels(cars []Car) []int {
 // deferHunt reports whether this tick's scan should be skipped because a
 // sibling radio is serving on a channel we would scan. It also returns the
 // sibling and channel so the decision can be logged rather than guessed at.
-func deferHunt(s *serveState, self string, cars []Car, tick int) (sta string, ch int, skip bool) {
+func deferHunt(s *serveState, self string, cars []Car, tick int, backoff int) (sta string, ch int, skip bool) {
 	sta, ch, busy := s.otherOn(self, channels(cars))
 	if !busy {
 		return "", 0, false
 	}
-	// Let every cochannelBackoff-th tick through so a second car is still
-	// discovered, just more slowly.
-	return sta, ch, tick%cochannelBackoff != 0
+	if backoff < 1 {
+		backoff = cochannelBackoff
+	}
+	// Let every backoff-th tick through so a second car is still discovered,
+	// just more slowly.
+	return sta, ch, tick%backoff != 0
 }

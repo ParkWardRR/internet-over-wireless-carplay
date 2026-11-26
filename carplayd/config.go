@@ -67,6 +67,10 @@ type Config struct {
 	Health        bool           // withdraw the route while the upstream is unreachable
 	HealthEvery   time.Duration
 	HealthFail    int           // consecutive failed checks before withdrawing
+	// CochannelBackoff is how many hunt ticks an idle radio skips while a
+	// sibling serves a car on the same channel. 0 = the built-in default,
+	// 1 = no backoff. See cochannel.go for why this is worth turning.
+	CochannelBackoff int
 	HealthTargets []string      // host:port to TCP-connect; default: each DNS server, port 53
 	IdleSwitch    time.Duration // serve another car once the served one has had no phone this long
 	RejoinAfter   time.Duration // never rejoin a car this soon after leaving it, whatever its signal
@@ -362,6 +366,11 @@ func setGlobal(cfg *Config, k, v string, dnsSet *bool) error {
 		cfg.HealthEvery, err = time.ParseDuration(v)
 	case "health_fail":
 		cfg.HealthFail, err = strconv.Atoi(v)
+	case "cochannel_backoff":
+		cfg.CochannelBackoff, err = strconv.Atoi(v)
+		if err == nil && cfg.CochannelBackoff < 1 {
+			return fmt.Errorf("cochannel_backoff %d: want 1 (no backoff) or more", cfg.CochannelBackoff)
+		}
 	case "health_target":
 		for _, s := range splitList(v) {
 			if _, perr := netip.ParseAddrPort(s); perr != nil {

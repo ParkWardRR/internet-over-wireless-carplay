@@ -466,10 +466,11 @@ func (d *daemon) hunt() {
 	// Scanning the channel a sibling radio is serving on costs that link
 	// airtime it cannot measure (see cochannel.go). Back off rather than stop,
 	// so a second car is still found.
-	if sta, ch, skip := deferHunt(d.serve, d.cfg.STA, d.cfg.Cars, d.huntTick); skip {
-		if d.huntTick%cochannelBackoff == 1 {
+	backoff := backoffTicks(d.cfg)
+	if sta, ch, skip := deferHunt(d.serve, d.cfg.STA, d.cfg.Cars, d.huntTick, backoff); skip {
+		if d.huntTick%backoff == 1 {
 			d.ev("hunt_backoff", "cochannel_with="+sta, "channel="+strconv.Itoa(ch),
-				"every="+strconv.Itoa(cochannelBackoff)+"_ticks")
+				"every="+strconv.Itoa(backoff)+"_ticks")
 		}
 		return
 	}
