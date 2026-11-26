@@ -47,39 +47,39 @@ func (c Car) Freq() int {
 
 // Config is carplayd's whole configuration.
 type Config struct {
-	Phy           string        // wiphy to put our STA on, e.g. phy0
-	STA           string        // name of the STA netdev we create
-	CtrlDir       string        // wpa_supplicant control directory for our instance
-	Hunt          time.Duration // scan period while not serving
-	Poll          time.Duration // signal poll period while serving
-	LeaveFor      time.Duration // how long below Leave before leaving
-	RAInterval    time.Duration // MaxRtrAdvInterval: periodic RAs every random [0.75, 1] × this (RFC 4861)
-	RouterLife    time.Duration // RA router lifetime
-	DNS           []netip.Addr  // upstream RDNSS servers, and the default health targets. With nat64 set the RA advertises the box instead, and these stay as what the box's own resolver forwards to.
-	NAT64         netip.Prefix  // /96 that a local DNS64/NAT64 pair maps onto IPv4 (invalid = off)
-	NAT64Allow    []netip.Addr  // the only IPv4 hosts a car may reach through NAT64
-	EventsPath    string        // EV lines are appended here too
-	WPABinary     string
-	Uplink        string         // interface toward the internet (for nat66)
-	NAT66         string         // "none" (fw4 or someone else does it), "ip6tables" or "nft"
-	Firewall      string         // "nft": isolate the car networks (carplayd table); "none"
-	Block         []netip.Prefix // extra destinations phones must not reach (home LAN beyond the uplink)
-	Health        bool           // withdraw the route while the upstream is unreachable
-	HealthEvery   time.Duration
-	HealthFail    int           // consecutive failed checks before withdrawing
+	Phy         string        // wiphy to put our STA on, e.g. phy0
+	STA         string        // name of the STA netdev we create
+	CtrlDir     string        // wpa_supplicant control directory for our instance
+	Hunt        time.Duration // scan period while not serving
+	Poll        time.Duration // signal poll period while serving
+	LeaveFor    time.Duration // how long below Leave before leaving
+	RAInterval  time.Duration // MaxRtrAdvInterval: periodic RAs every random [0.75, 1] × this (RFC 4861)
+	RouterLife  time.Duration // RA router lifetime
+	DNS         []netip.Addr  // upstream RDNSS servers, and the default health targets. With nat64 set the RA advertises the box instead, and these stay as what the box's own resolver forwards to.
+	NAT64       netip.Prefix  // /96 that a local DNS64/NAT64 pair maps onto IPv4 (invalid = off)
+	NAT64Allow  []netip.Addr  // the only IPv4 hosts a car may reach through NAT64
+	EventsPath  string        // EV lines are appended here too
+	WPABinary   string
+	Uplink      string         // interface toward the internet (for nat66)
+	NAT66       string         // "none" (fw4 or someone else does it), "ip6tables" or "nft"
+	Firewall    string         // "nft": isolate the car networks (carplayd table); "none"
+	Block       []netip.Prefix // extra destinations phones must not reach (home LAN beyond the uplink)
+	Health      bool           // withdraw the route while the upstream is unreachable
+	HealthEvery time.Duration
+	HealthFail  int // consecutive failed checks before withdrawing
 	// CochannelBackoff is how many hunt ticks an idle radio skips while a
 	// sibling serves a car on the same channel. 0 = the built-in default,
 	// 1 = no backoff. See cochannel.go for why this is worth turning.
 	CochannelBackoff int
-	HealthTargets []string      // host:port to TCP-connect; default: each DNS server, port 53
-	IdleSwitch    time.Duration // serve another car once the served one has had no phone this long
-	RejoinAfter   time.Duration // never rejoin a car this soon after leaving it, whatever its signal
-	Survey        time.Duration // lab: log each visible car's signal this often ("sighting", "signal" events); 0 = off
-	Metrics       string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
-	Debug         bool          // log every wpa event, full scan results, all link counters and the leave decision each poll
-	Learn         bool          // derive each car's thresholds from how its link actually behaves
-	StatePath     string        // where learned profiles are persisted ("" = in memory only)
-	Cars          []Car
+	HealthTargets    []string      // host:port to TCP-connect; default: each DNS server, port 53
+	IdleSwitch       time.Duration // serve another car once the served one has had no phone this long
+	RejoinAfter      time.Duration // never rejoin a car this soon after leaving it, whatever its signal
+	Survey           time.Duration // lab: log each visible car's signal this often ("sighting", "signal" events); 0 = off
+	Metrics          string        // Prometheus listen address, e.g. 127.0.0.1:9101 ("" = off)
+	Debug            bool          // log every wpa event, full scan results, all link counters and the leave decision each poll
+	Learn            bool          // derive each car's thresholds from how its link actually behaves
+	StatePath        string        // where learned profiles are persisted ("" = in memory only)
+	Cars             []Car
 }
 
 func defaultConfig() Config {

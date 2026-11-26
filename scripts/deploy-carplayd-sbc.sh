@@ -83,6 +83,25 @@ leave_for = 2s
 router_lifetime = 12s
 metrics = :9111
 
+# Both cars sit on channel 11, so the idle radio sweeps the exact channel the
+# other one is serving a live CarPlay session on, from an antenna inches away.
+# Raised from the built-in 8 to 30 on 2026-11-25 as an experiment, after the
+# F32 lost its link five times in a week -- every one preceded by beacon loss
+# at -56..-62 dBm with zero tx failures, i.e. the head unit's AP going quiet
+# while our link to it was perfect. The box cannot fix that, but its own
+# co-channel scanning is the one way it might be contributing, and that has
+# never been measured.
+#
+# Cost: a second car takes ~30 s to discover instead of ~8 s. Acceptable while
+# the two cars have still never been in the garage at the same time.
+#
+# To judge it, count beacon losses per car per day before and after:
+#   journalctl -u carplayd --since '7 days ago' | grep -c 'cara CTRL-EVENT-BEACON-LOSS'
+# Baseline for the week to 2026-11-25: cara 5 (5 fatal), carb 153 (2 fatal).
+# Set COCHANNEL=1 to disable the backoff entirely (the control arm). If cara's
+# count does not move, put this back to 8 -- the head unit owns it alone.
+cochannel_backoff = ${COCHANNEL:-30}
+
 # DEBUG=on during a drive assessment: every wpa event, scan, station dump,
 # neighbour table and leave decision. Off by default -- it writes roughly a
 # line a second per car, which is a lot of SD card for a box left running.
